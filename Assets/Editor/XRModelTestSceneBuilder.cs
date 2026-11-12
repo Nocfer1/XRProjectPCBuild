@@ -23,7 +23,8 @@ public static class XRModelTestSceneBuilder
                 EditorSceneManager.CloseScene(existing, true);
         }
 
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+        SceneManager.SetActiveScene(scene);
         scene.name = "XRModelTestScene";
 
         var interactionManagerObject = new GameObject("XR Interaction Manager");
@@ -92,7 +93,8 @@ public static class XRModelTestSceneBuilder
 
         var origin = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
         origin.name = "XR Origin (Controllers)";
-        origin.transform.position = new Vector3(0f, 0f, -0.45f);
+        // The table is along +Z, so the tracked camera starts in front of it and looks toward it.
+        origin.transform.position = new Vector3(0f, 0f, -0.30f);
         origin.transform.rotation = Quaternion.identity;
         var cameraOffset = origin.transform.Find("Camera Offset");
         if (cameraOffset != null)
@@ -140,6 +142,18 @@ public static class XRModelTestSceneBuilder
             visual.transform.localRotation = Quaternion.identity;
             visual.transform.localScale = GetTestScale(paths[i]);
 
+            // Imported scenes sometimes carry their own cameras/lights. Keep their render meshes,
+            // but only the XR Origin camera and our key light should be active in this test scene.
+            var embeddedCameras = visual.GetComponentsInChildren<Camera>(true);
+            foreach (var embeddedCamera in embeddedCameras)
+                embeddedCamera.enabled = false;
+            var embeddedLights = visual.GetComponentsInChildren<Light>(true);
+            foreach (var embeddedLight in embeddedLights)
+                embeddedLight.enabled = false;
+            var embeddedListeners = visual.GetComponentsInChildren<AudioListener>(true);
+            foreach (var listener in embeddedListeners)
+                listener.enabled = false;
+
             var renderers = visual.GetComponentsInChildren<Renderer>(true);
             if (renderers.Length == 0)
             {
@@ -186,12 +200,15 @@ public static class XRModelTestSceneBuilder
             if (triangleCount > 150000)
                 Debug.LogWarning(paths[i] + " contains " + triangleCount + " triangles; inspect VR performance before using it in a larger scene.");
 
-            item.transform.position = new Vector3(((i % 5) - 2) * 0.68f, 0f, 0.58f + (i / 5) * 0.98f);
-            item.transform.position += Vector3.up * (TableTop + 0.012f - bounds.min.y);
+            // The bounds were measured while the wrapper was at the origin. They are now local
+            // to the wrapper, so retain that center when positioning the wrapper on the tabletop.
+            var itemX = ((i % 5) - 2) * 0.45f;
+            var itemZ = 0.43f + (i / 5) * 0.52f;
+            item.transform.position = new Vector3(itemX, TableTop - bounds.min.y, itemZ);
 
             var box = item.AddComponent<BoxCollider>();
-            box.center = bounds.center - item.transform.position;
-            box.size = Vector3.Max(bounds.size * 1.04f, new Vector3(0.025f, 0.025f, 0.025f));
+            box.center = bounds.center;
+            box.size = Vector3.Max(bounds.size * 1.01f, new Vector3(0.025f, 0.025f, 0.025f));
 
             var body = item.AddComponent<Rigidbody>();
             body.mass = 0.5f;
@@ -212,9 +229,10 @@ public static class XRModelTestSceneBuilder
                 managerProperty.objectReferenceValue = manager;
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
-            Debug.Log(string.Format("XR model audit | {0} | world bounds {1} m | pivot-to-bounds center {2} m | renderers {3} | meshes {4} | vertices {5} | triangles {6} | missing materials {7} | meshes without normals {8} | non-readable meshes {9} | BoxCollider",
-                paths[i], bounds.size.ToString("F3"), (bounds.center - item.transform.position).ToString("F3"),
-                renderers.Length, checkedMeshes.Count, vertexCount, triangleCount, materialsMissing, meshesWithoutNormals, nonReadableMeshes));
+            Debug.Log(string.Format("XR model audit | {0} | world bounds {1} m | wrapper-local collider center {2} m | renderers {3} | meshes {4} | vertices {5} | triangles {6} | missing materials {7} | meshes without normals {8} | non-readable meshes {9} | disabled embedded cameras/lights/audio listeners {10}/{11}/{12} | BoxCollider aligned",
+                paths[i], bounds.size.ToString("F3"), bounds.center.ToString("F3"), renderers.Length, checkedMeshes.Count,
+                vertexCount, triangleCount, materialsMissing, meshesWithoutNormals, nonReadableMeshes,
+                embeddedCameras.Length, embeddedLights.Length, embeddedListeners.Length));
         }
     }
 
