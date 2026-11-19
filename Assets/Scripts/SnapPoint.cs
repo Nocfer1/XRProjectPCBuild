@@ -7,84 +7,47 @@ public class SnapPoint : MonoBehaviour
     [Header("Slot Configuration")]
     public SlotType acceptedSlotType;
 
-    [Tooltip("Exact target transform where the part's alignment pivot snaps. Defaults to this GameObject's transform.")]
+    [Tooltip("Target pose for the part's alignment pivot. Defaults to this object's transform.")]
     public Transform snapTransform;
 
     [Header("Precision Tolerances")]
-    [Tooltip("Maximum allowable distance in meters between alignment pivot and snapTransform.")]
-    public float maxPositionError = 0.015f;
+    [Min(0f)] public float maxPositionError = 0.015f;
+    [Range(-1f, 1f)] public float minOrientationAlignment = 0.95f;
 
-    [Tooltip("Minimum dot product (-1 to 1) for forward and up alignment. 0.95 is roughly ~18 degrees.")]
-    public float minOrientationAlignment = 0.95f;
-
-    public bool isOccupied { get; private set; }
     public MountablePart SeatedPart { get; private set; }
-
-    private void Awake()
-    {
-        if (snapTransform == null)
-        {
-            snapTransform = transform;
-        }
-    }
+    public bool isOccupied => SeatedPart != null;
+    public Transform Target => snapTransform != null ? snapTransform : transform;
 
     public bool CanAccept(MountablePart part)
     {
-        return part != null && !isOccupied && part.compatibleSlotType == acceptedSlotType;
+        return isActiveAndEnabled && part != null && !part.IsMounted && !isOccupied &&
+               part.compatibleSlotType == acceptedSlotType && !Target.IsChildOf(part.transform);
     }
 
-    public bool EvaluatePrecisionFit(Transform partAlignmentPivot)
+    public bool EvaluatePrecisionFit(Transform pivot)
     {
-        if (isOccupied || snapTransform == null || partAlignmentPivot == null)
-        {
-            return false;
-        }
+        if (isOccupied || pivot == null) return false;
+        Transform target = Target;
+        return Vector3.Distance(pivot.position, target.position) <= maxPositionError &&
+               Vector3.Dot(pivot.forward, target.forward) >= minOrientationAlignment &&
+               Vector3.Dot(pivot.up, target.up) >= minOrientationAlignment;
+    }
 
-        float distance = Vector3.Distance(partAlignmentPivot.position, snapTransform.position);
-        if (distance > maxPositionError)
-        {
-            return false;
-        }
-
-        float forwardMatch = Vector3.Dot(partAlignmentPivot.forward, snapTransform.forward);
-        float upMatch = Vector3.Dot(partAlignmentPivot.up, snapTransform.up);
-
-        if (forwardMatch < minOrientationAlignment || upMatch < minOrientationAlignment)
-        {
-            return false;
-        }
-
+    public bool TrySeat(MountablePart part)
+    {
+        if (!CanAccept(part) || !EvaluatePrecisionFit(part.AlignmentPivot)) return false;
+        if (!part.SeatIn(this)) return false;
+        SeatedPart = part;
         return true;
     }
 
-    public void LockPart(MountablePart part, Transform partAlignmentPivot)
+    internal void ClearSeat(MountablePart part)
     {
-        if (part == null || snapTransform == null) return;
+        if (SeatedPart == part) SeatedPart = null;
+    }
 
-        Transform pivot = partAlignmentPivot != null ? partAlignmentPivot : part.transform;
-        Rigidbody partRb = part.GetComponent<Rigidbody>();
-
-        isOccupied = true;
-        SeatedPart = part;
-
-        if (partRb != null)
-        {
-            partRb.linearVelocity = Vector3.zero;
-            partRb.angularVelocity = Vector3.zero;
-            partRb.isKinematic = true;
-            partRb.useGravity = false;
-        }
-
-        // Compute pivot offset and rotation delta in world space BEFORE parenting/moving,
-        // so rotating the part around its pivot places `pivot` cleanly onto `snapTransform`.
-        Quaternion pivotToRootRot = Quaternion.Inverse(pivot.rotation) * part.transform.rotation;
-        Vector3 pivotToRootOffset = part.transform.position - pivot.position;
-
-        Quaternion targetPivotRot = snapTransform.rotation;
-        Quaternion targetPartRot = targetPivotRot * pivotToRootRot;
-        Vector3 targetPartPos = snapTransform.position + (targetPivotRot * Quaternion.Inverse(pivot.rotation) * pivotToRootOffset);
-
-        part.transform.SetParent(snapTransform, worldPositionStays: true);
-        part.transform.SetPositionAndRotation(targetPartPos, targetPartRot);
+    private void OnDisable()
+    {
+        if (SeatedPart != null) SeatedPart.Unmount();
     }
 }

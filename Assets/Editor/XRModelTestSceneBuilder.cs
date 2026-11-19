@@ -219,6 +219,13 @@ public static class XRModelTestSceneBuilder
 
             var grab = item.AddComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
             grab.movementType = UnityEngine.XR.Interaction.Toolkit.Interactables.XRBaseInteractable.MovementType.VelocityTracking;
+            grab.selectMode = InteractableSelectMode.Multiple;
+            grab.useDynamicAttach = true;
+            grab.matchAttachPosition = true;
+            grab.matchAttachRotation = true;
+            grab.snapToColliderVolume = false;
+            grab.reinitializeDynamicAttachEverySingleGrab = true;
+            grab.trackScale = false;
             grab.throwOnDetach = true;
             grab.trackPosition = true;
             grab.trackRotation = true;
