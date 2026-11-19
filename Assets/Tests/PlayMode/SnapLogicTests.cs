@@ -5,6 +5,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Filtering;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
@@ -235,6 +236,113 @@ public class SnapLogicTests
         yield return null;
     }
 
+    [UnityTest]
+    public IEnumerator PullRequiresAnotherHandAndTracksTheMovingHost()
+    {
+        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        TestGrabInteractor boardHand = CreateObject("board hand").AddComponent<TestGrabInteractor>();
+        TestGrabInteractor cpuHand = CreateObject("cpu hand").AddComponent<TestGrabInteractor>();
+        GameObject board = CreateObject("board");
+        board.AddComponent<BoxCollider>();
+        XRGrabInteractable boardGrab = board.AddComponent<XRGrabInteractable>();
+        Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
+        slot.transform.SetParent(board.transform, true);
+        Set(slot, "requirePullToRemove", true);
+        Set(slot, "requireHostHeld", true);
+        Set(slot, "pullDistance", 0.03f);
+        Set(slot, "pullHoldSeconds", 0f);
+
+        GameObject cpu = CreateObject("cpu");
+        cpu.AddComponent<BoxCollider>();
+        Component part = cpu.AddComponent(PartType);
+        XRGrabInteractable cpuGrab = cpu.GetComponent<XRGrabInteractable>();
+        cpuGrab.useDynamicAttach = true;
+        Assert.That((bool)Call(slot, "TrySeat", part), Is.True);
+        manager.SelectEnter((IXRSelectInteractor)cpuHand, (IXRSelectInteractable)cpuGrab);
+        Assert.That(cpuGrab.isSelected, Is.True);
+        Assert.That((bool)Get(part, "IsMounted"), Is.True, "Gripping alone must not unmount");
+        Assert.That(cpu.GetComponent<Rigidbody>().isKinematic, Is.True);
+
+        cpuHand.transform.position = Vector3.up * 0.1f;
+        part.GetType().GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(part, null);
+        Assert.That((bool)Get(part, "IsMounted"), Is.True, "Host must be held by another hand");
+        manager.SelectEnter((IXRSelectInteractor)boardHand, (IXRSelectInteractable)boardGrab);
+        Assert.That(boardGrab.isSelected, Is.True);
+        board.transform.position = Vector3.right;
+        cpuHand.transform.position += Vector3.right;
+        part.GetType().GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(part, null);
+        Assert.That((bool)Get(part, "IsMounted"), Is.True, "Moving both together is not a pull");
+
+        cpuHand.transform.position += Vector3.up * 0.04f;
+        part.GetType().GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(part, null);
+        Assert.That((bool)Get(part, "IsMounted"), Is.False);
+        Assert.That(cpuGrab.isSelected, Is.True, "CPU remains in the pulling hand");
+        Assert.That(cpu.GetComponent<Rigidbody>().isKinematic, Is.False);
+        manager.SelectExit((IXRSelectInteractor)cpuHand, (IXRSelectInteractable)cpuGrab);
+        manager.SelectExit((IXRSelectInteractor)boardHand, (IXRSelectInteractable)boardGrab);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator ReleasingAndRegrabbingWithoutPullLeavesPartSeated()
+    {
+        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        TestGrabInteractor hand = CreateObject("hand").AddComponent<TestGrabInteractor>();
+        Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
+        Set(slot, "requirePullToRemove", true);
+        GameObject cpu = CreateObject("cpu");
+        cpu.AddComponent<BoxCollider>();
+        Component part = cpu.AddComponent(PartType);
+        XRGrabInteractable grab = cpu.GetComponent<XRGrabInteractable>();
+        grab.useDynamicAttach = true;
+        Assert.That((bool)Call(slot, "TrySeat", part), Is.True);
+
+        manager.SelectEnter((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+        manager.SelectExit((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+        manager.SelectEnter((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+        Assert.That((bool)Get(part, "IsMounted"), Is.True);
+        Assert.That(cpu.transform.parent, Is.SameAs(slot.transform));
+        Assert.That(cpu.GetComponent<Rigidbody>().isKinematic, Is.True);
+        Assert.That(grab.trackPosition, Is.False);
+
+        manager.SelectExit((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+        yield return new WaitForEndOfFrame();
+        yield return null;
+        Assert.That((bool)Get(part, "IsMounted"), Is.True);
+        Assert.That((bool)Get(slot, "isOccupied"), Is.True);
+        Assert.That(grab.trackPosition, Is.True);
+        Assert.That(cpu.GetComponent<Rigidbody>().isKinematic, Is.True);
+    }
+
+    [UnityTest]
+    public IEnumerator HeftUsesLighterFollowForTwoHandsAndRestoresSettings()
+    {
+        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        TestGrabInteractor first = CreateObject("first").AddComponent<TestGrabInteractor>();
+        TestGrabInteractor second = CreateObject("second").AddComponent<TestGrabInteractor>();
+        GameObject obj = CreateObject("heavy object");
+        obj.AddComponent<BoxCollider>();
+        XRGrabInteractable grab = obj.AddComponent<XRGrabInteractable>();
+        grab.selectMode = InteractableSelectMode.Multiple;
+        bool originalSmooth = grab.smoothPosition;
+        float originalAmount = grab.smoothPositionAmount;
+        Type heftType = Type.GetType("GrabHeft, Assembly-CSharp", true);
+        obj.AddComponent(heftType);
+
+        manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
+        Assert.That(grab.smoothPosition, Is.True);
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        manager.SelectEnter((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
+        Assert.That(grab.interactorsSelecting.Count, Is.EqualTo(2));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(12f));
+        manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        manager.SelectExit((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
+        Assert.That(grab.smoothPosition, Is.EqualTo(originalSmooth));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(originalAmount));
+        yield return null;
+    }
+
     [TearDown]
     public void Cleanup()
     {
@@ -243,3 +351,5 @@ public class SnapLogicTests
         objects.Clear();
     }
 }
+
+public class TestGrabInteractor : XRBaseInteractor { }

@@ -28,9 +28,24 @@ public class SnapPoint : MonoBehaviour
     [Tooltip("Optional active collider defining a region the controller must be inside. A trigger is recommended.")]
     public Collider removalGripRegion;
 
+    [Header("Pull To Remove")]
+    [Tooltip("Keep the part seated while held until the controller pulls along the removal direction.")]
+    public bool requirePullToRemove;
+    [Tooltip("Require a different controller to hold the host object while pulling.")]
+    public bool requireHostHeld = true;
+    [Min(0.001f)] public float pullDistance = 0.03f;
+    [Min(0f)] public float pullHoldSeconds = 0.15f;
+
     public MountablePart SeatedPart { get; private set; }
     public bool isOccupied => SeatedPart != null;
     public Transform Target => snapTransform != null ? snapTransform : transform;
+    public Transform RemovalDirection => removalApproach != null ? removalApproach : Target;
+
+    public float MeasurePullDistance(Vector3 startInTargetSpace, Vector3 currentPosition)
+    {
+        Vector3 startWorld = Target.TransformPoint(startInTargetSpace);
+        return Vector3.Dot(currentPosition - startWorld, RemovalDirection.up);
+    }
 
     public bool CanAccept(MountablePart part)
     {
