@@ -5,6 +5,10 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.XR.Interaction.Toolkit.Filtering;
+using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
+using UnityEngine.XR.Interaction.Toolkit.Interactors.Casters;
 
 // Assembly-CSharp is a predefined Unity assembly, so tests in an asmdef use reflection.
 public class SnapLogicTests
@@ -74,6 +78,69 @@ public class SnapLogicTests
         Assert.That((bool)Get(part, "IsMounted"), Is.False);
         Assert.That(body.isKinematic, Is.False);
         Assert.That(body.useGravity, Is.True);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator SeatedPartIgnoresHostCollisionsAndRestoresThemOnRemoval()
+    {
+        GameObject host = CreateObject("motherboard");
+        host.AddComponent<Rigidbody>().isKinematic = true;
+        Collider hostCollider = host.AddComponent<BoxCollider>();
+        Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
+        slot.transform.SetParent(host.transform, true);
+
+        GameObject partObject = CreateObject("cpu");
+        Collider partCollider = partObject.AddComponent<BoxCollider>();
+        Component part = partObject.AddComponent(PartType);
+        Collider otherCollider = CreateObject("other object").AddComponent<BoxCollider>();
+
+        Assert.That((bool)Call(part, "TryMountToNearbySlot"), Is.True);
+        Assert.That(Physics.GetIgnoreCollision(partCollider, hostCollider), Is.True);
+        Assert.That(Physics.GetIgnoreCollision(partCollider, otherCollider), Is.False);
+
+        Call(part, "Unmount");
+        Assert.That(Physics.GetIgnoreCollision(partCollider, hostCollider), Is.False);
+        Physics.IgnoreCollision(partCollider, hostCollider, true);
+        Assert.That((bool)Call(part, "TryMountToNearbySlot"), Is.True);
+        Call(part, "Unmount");
+        Assert.That(Physics.GetIgnoreCollision(partCollider, hostCollider), Is.True);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator PcPartsRequireTheNearCasterAndKeepTheFilterAfterReparenting()
+    {
+        GameObject root = CreateObject("PC Components");
+        GameObject part = CreateObject("part");
+        part.transform.SetParent(root.transform, false);
+        BoxCollider collider = part.AddComponent<BoxCollider>();
+        collider.size = Vector3.one * 0.02f;
+        XRGrabInteractable grab = part.AddComponent<XRGrabInteractable>();
+        Type filterType = Type.GetType("NearOnlyGrabFilter, Assembly-CSharp", true);
+        IXRSelectFilter filter = (IXRSelectFilter)root.AddComponent(filterType);
+
+        GameObject hand = CreateObject("hand");
+        NearFarInteractor nearFar = hand.AddComponent<NearFarInteractor>();
+        SphereInteractionCaster sphere = nearFar.nearInteractionCaster as SphereInteractionCaster;
+        Assert.That(sphere, Is.Not.Null);
+        sphere.castRadius = 0.1f;
+        sphere.castOrigin = hand.transform;
+        hand.transform.position = new Vector3(0.5f, 0f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.False);
+
+        hand.transform.position = new Vector3(0.05f, 0f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.True);
+        part.transform.SetParent(null, true);
+        var filters = new List<IXRSelectFilter>();
+        grab.selectFilters.GetAll(filters);
+        Assert.That(filters, Does.Contain(filter));
+        hand.transform.position = new Vector3(0.5f, 0f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.False);
+        XRRayInteractor ray = CreateObject("ray").AddComponent<XRRayInteractor>();
+        Assert.That(filter.Process(ray, grab), Is.False);
+        XRDirectInteractor direct = CreateObject("direct hand").AddComponent<XRDirectInteractor>();
+        Assert.That(filter.Process(direct, grab), Is.True);
         yield return null;
     }
 
