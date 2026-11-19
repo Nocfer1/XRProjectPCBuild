@@ -1,7 +1,9 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
-public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply }
+public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply, CPUCooler, Motherboard }
 
 public class SnapPoint : MonoBehaviour
 {
@@ -10,6 +12,15 @@ public class SnapPoint : MonoBehaviour
 
     [Tooltip("Target pose for the part's alignment pivot. Defaults to this object's transform.")]
     public Transform snapTransform;
+
+    [Header("Assembly Order")]
+    [Tooltip("All listed snap points must be occupied before this socket can be used. Their parts cannot be removed while this socket is occupied.")]
+    public List<SnapPoint> requiredOccupiedSlots = new List<SnapPoint>();
+    [Tooltip("Called once when an actual mount or removal attempt is blocked by assembly order.")]
+    public AssemblyOrderViolationEvent onOrderRejected = new AssemblyOrderViolationEvent();
+
+    public static event Action<AssemblyOrderViolation> OrderRejected;
+    private static readonly HashSet<SnapPoint> activeSlots = new HashSet<SnapPoint>();
 
     [Header("Precision Tolerances")]
     [Min(0f)] public float maxPositionError = 0.015f;
@@ -49,8 +60,49 @@ public class SnapPoint : MonoBehaviour
 
     public bool CanAccept(MountablePart part)
     {
+        return CanConsider(part) && !TryGetMissingPrerequisite(out _);
+    }
+
+    public bool CanConsider(MountablePart part)
+    {
         return isActiveAndEnabled && part != null && !part.IsMounted && !isOccupied &&
                part.compatibleSlotType == acceptedSlotType && !Target.IsChildOf(part.transform);
+    }
+
+    public bool TryGetMissingPrerequisite(out SnapPoint missing)
+    {
+        foreach (SnapPoint required in requiredOccupiedSlots)
+        {
+            if (required == null || required == this || !required.isOccupied)
+            {
+                missing = required;
+                return true;
+            }
+        }
+        missing = null;
+        return false;
+    }
+
+    public bool TryGetBlockingDependent(out SnapPoint blocker)
+    {
+        foreach (SnapPoint other in activeSlots)
+        {
+            if (other != null && other != this && other.isOccupied && other.requiredOccupiedSlots.Contains(this))
+            {
+                blocker = other;
+                return true;
+            }
+        }
+        blocker = null;
+        return false;
+    }
+
+    public void ReportOrderRejected(AssemblyOrderViolationKind kind, MountablePart part, SnapPoint blockingSlot)
+    {
+        var violation = new AssemblyOrderViolation { kind = kind, attemptedSlot = this,
+            attemptedPart = part, blockingSlot = blockingSlot };
+        onOrderRejected?.Invoke(violation);
+        OrderRejected?.Invoke(violation);
     }
 
     public bool EvaluatePrecisionFit(Transform pivot)
@@ -90,7 +142,12 @@ public class SnapPoint : MonoBehaviour
 
     public bool TrySeat(MountablePart part)
     {
-        if (!CanAccept(part) || !EvaluatePrecisionFit(part.AlignmentPivot)) return false;
+        if (!CanConsider(part) || !EvaluatePrecisionFit(part.AlignmentPivot)) return false;
+        if (TryGetMissingPrerequisite(out var missing))
+        {
+            ReportOrderRejected(AssemblyOrderViolationKind.MissingPrerequisite, part, missing);
+            return false;
+        }
         if (!part.SeatIn(this)) return false;
         SeatedPart = part;
         return true;
@@ -101,8 +158,11 @@ public class SnapPoint : MonoBehaviour
         if (SeatedPart == part) SeatedPart = null;
     }
 
+    private void OnEnable() => activeSlots.Add(this);
+
     private void OnDisable()
     {
-        if (SeatedPart != null) SeatedPart.Unmount();
+        activeSlots.Remove(this);
+        if (SeatedPart != null) SeatedPart.ForceUnmount();
     }
 }

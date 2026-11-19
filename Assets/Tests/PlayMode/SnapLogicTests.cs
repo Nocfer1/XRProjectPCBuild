@@ -343,6 +343,122 @@ public class SnapLogicTests
         yield return null;
     }
 
+    [UnityTest]
+    public IEnumerator PrerequisitesBlockMountAndDependentBlocksRemovalWithOneEventEach()
+    {
+        Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
+        Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
+        var required = (IList)fanSlot.GetType().GetField("requiredOccupiedSlots").GetValue(fanSlot);
+        required.Add(cpuSlot);
+        var slotType = fanSlot.GetType().GetField("acceptedSlotType").FieldType;
+        object coolerType = Enum.Parse(slotType, "CPUCooler");
+        Set(fanSlot, "acceptedSlotType", coolerType);
+        Component cpu = CreateObject("CPU").AddComponent(PartType);
+        Component fan = CreateObject("fan").AddComponent(PartType);
+        Set(fan, "compatibleSlotType", coolerType);
+        Physics.SyncTransforms();
+
+        EventInfo rejected = SlotType.GetEvent("OrderRejected", BindingFlags.Public | BindingFlags.Static);
+        int count = 0;
+        object lastViolation = null;
+        Action<object> capture = value => { count++; lastViolation = value; };
+        Delegate handler = Delegate.CreateDelegate(rejected.EventHandlerType, capture.Target, capture.Method);
+        rejected.AddEventHandler(null, handler);
+        try
+        {
+            Assert.That((bool)Call(fan, "TryMountToNearbySlot"), Is.False);
+            Assert.That(count, Is.EqualTo(1));
+            Assert.That(lastViolation.GetType().GetField("kind").GetValue(lastViolation).ToString(), Is.EqualTo("MissingPrerequisite"));
+            Assert.That(lastViolation.GetType().GetField("blockingSlot").GetValue(lastViolation), Is.SameAs(cpuSlot));
+
+            Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+            Assert.That((bool)Call(fan, "TryMountToNearbySlot"), Is.True);
+            Call(cpu, "Unmount");
+            Assert.That((bool)Get(cpu, "IsMounted"), Is.True);
+            Assert.That(count, Is.EqualTo(2));
+            Assert.That(lastViolation.GetType().GetField("kind").GetValue(lastViolation).ToString(), Is.EqualTo("DependentStillMounted"));
+            Assert.That(lastViolation.GetType().GetField("blockingSlot").GetValue(lastViolation), Is.SameAs(fanSlot));
+
+            Call(fan, "Unmount");
+            Call(cpu, "Unmount");
+            Assert.That((bool)Get(cpu, "IsMounted"), Is.False);
+            Assert.That(count, Is.EqualTo(2));
+        }
+        finally
+        {
+            rejected.RemoveEventHandler(null, handler);
+        }
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator BlockedGrabKeepsPartMountedAndDoesNotSpamEvents()
+    {
+        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        TestGrabInteractor hand = CreateObject("hand").AddComponent<TestGrabInteractor>();
+        Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
+        Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
+        ((IList)fanSlot.GetType().GetField("requiredOccupiedSlots").GetValue(fanSlot)).Add(cpuSlot);
+        GameObject cpuObject = CreateObject("CPU");
+        cpuObject.AddComponent<BoxCollider>();
+        Component cpu = cpuObject.AddComponent(PartType);
+        XRGrabInteractable grab = cpuObject.GetComponent<XRGrabInteractable>();
+        Component fan = CreateObject("fan").AddComponent(PartType);
+        Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+        Assert.That((bool)Call(fanSlot, "TrySeat", fan), Is.True);
+
+        EventInfo rejected = SlotType.GetEvent("OrderRejected", BindingFlags.Public | BindingFlags.Static);
+        int count = 0;
+        Action<object> capture = value => count++;
+        Delegate handler = Delegate.CreateDelegate(rejected.EventHandlerType, capture.Target, capture.Method);
+        rejected.AddEventHandler(null, handler);
+        try
+        {
+            manager.SelectEnter((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+            Assert.That(grab.isSelected, Is.True);
+            Assert.That((bool)Get(cpu, "IsMounted"), Is.True);
+            Assert.That(count, Is.EqualTo(1));
+            MethodInfo update = cpu.GetType().GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance);
+            update.Invoke(cpu, null);
+            update.Invoke(cpu, null);
+            Assert.That((bool)Get(cpu, "IsMounted"), Is.True);
+            Assert.That(count, Is.EqualTo(1));
+            manager.SelectExit((IXRSelectInteractor)hand, (IXRSelectInteractable)grab);
+        }
+        finally
+        {
+            rejected.RemoveEventHandler(null, handler);
+        }
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator GpuSocketCanDependOnMotherboardBeingMountedInCase()
+    {
+        Component caseSlot = CreateSlot("case motherboard mount", Vector3.zero, Quaternion.identity);
+        Component gpuSlot = CreateSlot("motherboard PCIe slot", Vector3.zero, Quaternion.identity);
+        var slotType = caseSlot.GetType().GetField("acceptedSlotType").FieldType;
+        object motherboardType = Enum.Parse(slotType, "Motherboard");
+        object gpuType = Enum.Parse(slotType, "PCIe");
+        Set(caseSlot, "acceptedSlotType", motherboardType);
+        Set(gpuSlot, "acceptedSlotType", gpuType);
+        ((IList)gpuSlot.GetType().GetField("requiredOccupiedSlots").GetValue(gpuSlot)).Add(caseSlot);
+        Component motherboard = CreateObject("motherboard").AddComponent(PartType);
+        Component gpu = CreateObject("GPU").AddComponent(PartType);
+        Set(motherboard, "compatibleSlotType", motherboardType);
+        Set(gpu, "compatibleSlotType", gpuType);
+
+        Assert.That((bool)Call(gpuSlot, "TrySeat", gpu), Is.False);
+        Assert.That((bool)Call(caseSlot, "TrySeat", motherboard), Is.True);
+        Assert.That((bool)Call(gpuSlot, "TrySeat", gpu), Is.True);
+        Call(motherboard, "Unmount");
+        Assert.That((bool)Get(motherboard, "IsMounted"), Is.True);
+        Call(gpu, "Unmount");
+        Call(motherboard, "Unmount");
+        Assert.That((bool)Get(motherboard, "IsMounted"), Is.False);
+        yield return null;
+    }
+
     [TearDown]
     public void Cleanup()
     {
