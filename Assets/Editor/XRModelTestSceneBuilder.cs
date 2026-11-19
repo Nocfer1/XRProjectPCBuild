@@ -231,6 +231,13 @@ public static class XRModelTestSceneBuilder
             grab.trackPosition = true;
             grab.trackRotation = true;
             grab.retainTransformParent = false;
+            string modelName = System.IO.Path.GetFileNameWithoutExtension(paths[i]);
+            if (modelName.Equals("PSU", System.StringComparison.OrdinalIgnoreCase) ||
+                modelName.IndexOf("case", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                body.mass = modelName.Equals("PSU", System.StringComparison.OrdinalIgnoreCase) ? 2f : 6f;
+                item.AddComponent<GrabHeft>();
+            }
             var serialized = new SerializedObject(grab);
             var managerProperty = serialized.FindProperty("m_InteractionManager");
             if (managerProperty != null)

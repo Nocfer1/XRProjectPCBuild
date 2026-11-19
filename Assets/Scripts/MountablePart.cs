@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Filtering;
+using UnityEngine.XR.Interaction.Toolkit.Feedback;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
@@ -32,6 +33,15 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     private bool usedGravity;
     private bool retainParentBeforeMount;
     private bool restoreAfterGrab;
+    private bool seatedGripActive;
+    private bool savedTrackPosition;
+    private bool savedTrackRotation;
+    private bool savedThrowOnDetach;
+    private IXRSelectInteractor pullingInteractor;
+    private Vector3 pullStartInTargetSpace;
+    private float pullTimer;
+    private float nextPullHapticTime;
+    private bool pullBaselineReady;
     private readonly List<(Collider part, Collider host)> ignoredHostCollisions = new List<(Collider, Collider)>();
 
     private void Awake()
@@ -54,6 +64,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         grabInteractable.selectFilters.Remove(this);
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
+        EndSeatedGrip();
         Unmount();
         RestoreAfterGrab();
     }
@@ -80,7 +91,117 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     {
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
-        if (IsMounted) Unmount();
+        if (!IsMounted) return;
+        if (MountedSlot.requirePullToRemove)
+        {
+            if (!seatedGripActive) BeginSeatedGrip(args.interactorObject);
+            else MaintainSeatedGrip();
+        }
+        else Unmount();
+    }
+
+    private void BeginSeatedGrip(IXRSelectInteractor interactor)
+    {
+        seatedGripActive = true;
+        savedTrackPosition = grabInteractable.trackPosition;
+        savedTrackRotation = grabInteractable.trackRotation;
+        savedThrowOnDetach = grabInteractable.throwOnDetach;
+        MaintainSeatedGrip();
+        pullingInteractor = interactor;
+        ResetPullBaseline();
+    }
+
+    private void MaintainSeatedGrip()
+    {
+        grabInteractable.trackPosition = false;
+        grabInteractable.trackRotation = false;
+        grabInteractable.throwOnDetach = false;
+        grabInteractable.retainTransformParent = false;
+        partRigidbody.isKinematic = true;
+        partRigidbody.useGravity = false;
+        transform.SetParent(MountedSlot.Target, true);
+    }
+
+    private void Update()
+    {
+        if (!seatedGripActive || !IsMounted || !grabInteractable.isSelected) return;
+        if (pullingInteractor == null || !pullingInteractor.IsSelecting(grabInteractable))
+        {
+            pullingInteractor = grabInteractable.interactorsSelecting[0];
+            ResetPullBaseline();
+        }
+
+        if (MountedSlot.requireHostHeld && !IsHostHeldByAnotherInteractor())
+        {
+            ResetPullBaseline();
+            return;
+        }
+
+        if (!pullBaselineReady) ResetPullBaseline();
+        Vector3 handPosition = GetInteractorPosition(pullingInteractor, grabInteractable);
+        float distance = MountedSlot.MeasurePullDistance(pullStartInTargetSpace, handPosition);
+        if (distance > 0.003f && Time.time >= nextPullHapticTime)
+        {
+            float progress = Mathf.Clamp01(distance / Mathf.Max(0.001f, MountedSlot.pullDistance));
+            SendPullHaptic(pullingInteractor, Mathf.Lerp(0.1f, 0.25f, progress), 0.05f);
+            nextPullHapticTime = Time.time + 0.2f;
+        }
+        pullTimer = distance >= MountedSlot.pullDistance ? pullTimer + Time.deltaTime : 0f;
+        if (distance >= MountedSlot.pullDistance && pullTimer >= MountedSlot.pullHoldSeconds)
+        {
+            SendPullHaptic(pullingInteractor, 0.35f, 0.08f);
+            Unmount();
+        }
+    }
+
+    private static void SendPullHaptic(IXRInteractor interactor, float amplitude, float duration)
+    {
+        var feedback = interactor.transform.GetComponent<SimpleHapticFeedback>();
+        if (feedback != null && feedback.hapticImpulsePlayer != null)
+            feedback.hapticImpulsePlayer.SendHapticImpulse(amplitude, duration);
+    }
+
+    private bool IsHostHeldByAnotherInteractor()
+    {
+        XRGrabInteractable host = MountedSlot.GetComponentInParent<XRGrabInteractable>();
+        if (host == null) return false;
+        foreach (var interactor in host.interactorsSelecting)
+            if (interactor != pullingInteractor) return true;
+        return false;
+    }
+
+    private void ResetPullBaseline()
+    {
+        pullTimer = 0f;
+        pullBaselineReady = pullingInteractor != null && IsMounted;
+        if (pullBaselineReady)
+            pullStartInTargetSpace = MountedSlot.Target.InverseTransformPoint(GetInteractorPosition(pullingInteractor, grabInteractable));
+    }
+
+    private void EndSeatedGrip()
+    {
+        if (!seatedGripActive) return;
+        grabInteractable.trackPosition = savedTrackPosition;
+        grabInteractable.trackRotation = savedTrackRotation;
+        grabInteractable.throwOnDetach = savedThrowOnDetach;
+        grabInteractable.retainTransformParent = retainParentBeforeMount;
+        seatedGripActive = false;
+        pullingInteractor = null;
+        pullBaselineReady = false;
+        pullTimer = 0f;
+        nextPullHapticTime = 0f;
+    }
+
+    private void RebaseGrabAttachments()
+    {
+        if (!grabInteractable.useDynamicAttach) return;
+        foreach (var interactor in grabInteractable.interactorsSelecting)
+        {
+            Transform partAttach = grabInteractable.GetAttachTransform(interactor);
+            Transform handAttach = interactor.GetAttachTransform(grabInteractable);
+            if (partAttach != null && partAttach != transform && partAttach.IsChildOf(transform) && handAttach != null)
+                partAttach.SetPositionAndRotation(handAttach.position, handAttach.rotation);
+        }
     }
 
     private void OnReleased(SelectExitEventArgs args)
@@ -97,6 +218,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         pendingRelease = null;
         if (grabInteractable.isSelected) yield break;
 
+        if (IsMounted)
+        {
+            EndSeatedGrip();
+            partRigidbody.isKinematic = true;
+            partRigidbody.useGravity = false;
+            yield break;
+        }
         RestoreAfterGrab();
         Vector3 angularBefore = partRigidbody.angularVelocity;
         if (!grabInteractable.throwOnDetach && !partRigidbody.isKinematic)
@@ -185,6 +313,8 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     public void Unmount()
     {
         if (!IsMounted) return;
+        bool resumeHeldBody = seatedGripActive && grabInteractable.isSelected;
+        EndSeatedGrip();
         SnapPoint slot = MountedSlot;
         MountedSlot = null;
         slot.ClearSeat(this);
@@ -196,6 +326,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             // pre-seat values after XR Grab finishes dropping the part.
             grabInteractable.retainTransformParent = false;
             restoreAfterGrab = true;
+            if (resumeHeldBody) ResumeHeldBody();
         }
         else
         {
@@ -203,6 +334,18 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             partRigidbody.useGravity = usedGravity;
             grabInteractable.retainTransformParent = retainParentBeforeMount;
         }
+    }
+
+    private void ResumeHeldBody()
+    {
+        RebaseGrabAttachments();
+        // XR Grab started this selection while the seated body was kinematic.
+        var movement = grabInteractable.movementType;
+        foreach (var interactor in grabInteractable.interactorsSelecting)
+            if (interactor is XRBaseInteractor baseInteractor && baseInteractor.selectedInteractableMovementTypeOverride.HasValue)
+                movement = baseInteractor.selectedInteractableMovementTypeOverride.Value;
+        partRigidbody.isKinematic = movement != XRBaseInteractable.MovementType.VelocityTracking;
+        partRigidbody.useGravity = false;
     }
 
     private void RestoreAfterGrab()

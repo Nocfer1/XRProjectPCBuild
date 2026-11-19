@@ -243,6 +243,7 @@ GameObject:
   - component: {fileID: 169115638}
   - component: {fileID: 169115637}
   - component: {fileID: 169115636}
+  - component: {fileID: 169115639}
   m_Layer: 0
   m_Name: PSU
   m_TagString: Untagged
@@ -250,6 +251,20 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &169115639
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 169115634}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
+  oneHandFollow: 5
+  twoHandFollow: 12
 --- !u!4 &169115635
 Transform:
   m_ObjectHideFlags: 0
@@ -404,7 +419,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 169115634}
   serializedVersion: 5
-  m_Mass: 0.5
+  m_Mass: 2
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -2162,6 +2177,7 @@ GameObject:
   - component: {fileID: 908416899}
   - component: {fileID: 908416898}
   - component: {fileID: 908416897}
+  - component: {fileID: 908416900}
   m_Layer: 0
   m_Name: pc_case
   m_TagString: Untagged
@@ -2169,6 +2185,20 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &908416900
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
+  oneHandFollow: 5
+  twoHandFollow: 12
 --- !u!4 &908416896
 Transform:
   m_ObjectHideFlags: 0
@@ -2323,7 +2353,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 908416895}
   serializedVersion: 5
-  m_Mass: 0.5
+  m_Mass: 6
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -2932,6 +2962,7 @@ GameObject:
   - component: {fileID: 1229157865}
   - component: {fileID: 1229157864}
   - component: {fileID: 1229157863}
+  - component: {fileID: 1229157866}
   m_Layer: 0
   m_Name: Case
   m_TagString: Untagged
@@ -2939,6 +2970,20 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &1229157866
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1229157861}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
+  oneHandFollow: 5
+  twoHandFollow: 12
 --- !u!4 &1229157862
 Transform:
   m_ObjectHideFlags: 0
@@ -3093,7 +3138,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1229157861}
   serializedVersion: 5
-  m_Mass: 0.5
+  m_Mass: 6
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -4363,6 +4408,7 @@ GameObject:
   - component: {fileID: 1610706428}
   - component: {fileID: 1610706427}
   - component: {fileID: 1610706426}
+  - component: {fileID: 1610706429}
   m_Layer: 0
   m_Name: PC_Case
   m_TagString: Untagged
@@ -4370,6 +4416,20 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &1610706429
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1610706424}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
+  oneHandFollow: 5
+  twoHandFollow: 12
 --- !u!4 &1610706425
 Transform:
   m_ObjectHideFlags: 0
@@ -4524,7 +4584,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1610706424}
   serializedVersion: 5
-  m_Mass: 0.5
+  m_Mass: 6
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -5339,6 +5399,10 @@ MonoBehaviour:
   requireApproachDirection: 1
   removalApproach: {fileID: 0}
   removalGripRegion: {fileID: 0}
+  requirePullToRemove: 1
+  requireHostHeld: 1
+  pullDistance: 0.03
+  pullHoldSeconds: 0.15
 --- !u!65 &2094032190
 BoxCollider:
   m_ObjectHideFlags: 0
