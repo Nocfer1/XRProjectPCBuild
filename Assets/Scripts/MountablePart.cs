@@ -42,6 +42,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     private float pullTimer;
     private float nextPullHapticTime;
     private bool pullBaselineReady;
+    private SnapPoint reportedRemovalBlocker;
     private readonly List<(Collider part, Collider host)> ignoredHostCollisions = new List<(Collider, Collider)>();
 
     private void Awake()
@@ -65,7 +66,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
         EndSeatedGrip();
-        Unmount();
+        ForceUnmount();
         RestoreAfterGrab();
     }
 
@@ -92,6 +93,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
         if (!IsMounted) return;
+        if (MountedSlot.TryGetBlockingDependent(out var blocker))
+        {
+            if (!seatedGripActive) BeginSeatedGrip(args.interactorObject);
+            else MaintainSeatedGrip();
+            ReportRemovalBlocker(blocker);
+            return;
+        }
         if (MountedSlot.requirePullToRemove)
         {
             if (!seatedGripActive) BeginSeatedGrip(args.interactorObject);
@@ -131,6 +139,19 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             ResetPullBaseline();
         }
 
+        if (MountedSlot.TryGetBlockingDependent(out var blocker))
+        {
+            ReportRemovalBlocker(blocker);
+            ResetPullBaseline();
+            return;
+        }
+        reportedRemovalBlocker = null;
+        if (!MountedSlot.requirePullToRemove)
+        {
+            Unmount();
+            return;
+        }
+
         if (MountedSlot.requireHostHeld && !IsHostHeldByAnotherInteractor())
         {
             ResetPullBaseline();
@@ -159,6 +180,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         var feedback = interactor.transform.GetComponent<SimpleHapticFeedback>();
         if (feedback != null && feedback.hapticImpulsePlayer != null)
             feedback.hapticImpulsePlayer.SendHapticImpulse(amplitude, duration);
+    }
+
+    private void ReportRemovalBlocker(SnapPoint blocker)
+    {
+        if (reportedRemovalBlocker == blocker) return;
+        reportedRemovalBlocker = blocker;
+        MountedSlot.ReportOrderRejected(AssemblyOrderViolationKind.DependentStillMounted, this, blocker);
     }
 
     private bool IsHostHeldByAnotherInteractor()
@@ -190,6 +218,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         pullBaselineReady = false;
         pullTimer = 0f;
         nextPullHapticTime = 0f;
+        reportedRemovalBlocker = null;
     }
 
     private void RebaseGrabAttachments()
@@ -253,15 +282,28 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             Physics.AllLayers, QueryTriggerInteraction.Collide);
         SnapPoint bestFit = null;
         SnapPoint nearest = null;
+        SnapPoint blockedFit = null;
+        SnapPoint missingPrerequisite = null;
         float bestDistance = float.MaxValue;
         float nearestDistance = float.MaxValue;
+        float blockedDistance = float.MaxValue;
 
         foreach (Collider hit in hits)
         {
             SnapPoint slot = hit.GetComponentInParent<SnapPoint>();
-            if (slot == null || !slot.CanAccept(this)) continue;
+            if (slot == null || !slot.CanConsider(this)) continue;
             float distance = Vector3.Distance(pivot.position, slot.Target.position);
             if (distance < nearestDistance) { nearest = slot; nearestDistance = distance; }
+            if (distance <= slot.maxPositionError && slot.TryGetMissingPrerequisite(out var missing))
+            {
+                if (distance < blockedDistance)
+                {
+                    blockedFit = slot;
+                    missingPrerequisite = missing;
+                    blockedDistance = distance;
+                }
+                continue;
+            }
             if (distance < bestDistance && slot.EvaluatePrecisionFit(pivot))
             {
                 bestFit = slot;
@@ -270,6 +312,11 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         }
 
         if (bestFit != null && bestFit.TrySeat(this)) return true;
+        if (blockedFit != null)
+        {
+            blockedFit.ReportOrderRejected(AssemblyOrderViolationKind.MissingPrerequisite, this, missingPrerequisite);
+            return false;
+        }
         if (logSnapDiagnostics)
         {
             if (nearest == null)
@@ -311,6 +358,17 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     }
 
     public void Unmount()
+    {
+        if (!IsMounted) return;
+        if (MountedSlot.TryGetBlockingDependent(out var blocker))
+        {
+            MountedSlot.ReportOrderRejected(AssemblyOrderViolationKind.DependentStillMounted, this, blocker);
+            return;
+        }
+        ForceUnmount();
+    }
+
+    internal void ForceUnmount()
     {
         if (!IsMounted) return;
         bool resumeHeldBody = seatedGripActive && grabInteractable.isSelected;
