@@ -144,6 +144,97 @@ public class SnapLogicTests
         yield return null;
     }
 
+    [UnityTest]
+    public IEnumerator MountedPartRequiresCloseFrontApproachButLoosePartKeepsNormalRange()
+    {
+        GameObject root = CreateObject("PC Components");
+        GameObject cpu = CreateObject("cpu");
+        cpu.transform.SetParent(root.transform, false);
+        cpu.AddComponent<BoxCollider>().size = Vector3.one * 0.02f;
+        Component part = cpu.AddComponent(PartType);
+        XRGrabInteractable grab = cpu.GetComponent<XRGrabInteractable>();
+        Type filterType = Type.GetType("NearOnlyGrabFilter, Assembly-CSharp", true);
+        IXRSelectFilter filter = (IXRSelectFilter)root.AddComponent(filterType);
+        Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
+        Set(slot, "limitGrabDistance", true);
+        Set(slot, "mountedGrabDistance", 0.015f);
+        Set(slot, "requireApproachDirection", true);
+        Assert.That((bool)Call(slot, "TrySeat", part), Is.True);
+
+        GameObject hand = CreateObject("hand");
+        NearFarInteractor nearFar = hand.AddComponent<NearFarInteractor>();
+        SphereInteractionCaster sphere = nearFar.nearInteractionCaster as SphereInteractionCaster;
+        Assert.That(sphere, Is.Not.Null);
+        sphere.castRadius = 0.1f;
+        sphere.castOrigin = hand.transform;
+        Physics.SyncTransforms();
+
+        hand.transform.position = new Vector3(0f, 0.02f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.True, "Close approach from the front");
+        hand.transform.position = new Vector3(0f, -0.02f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.False, "Behind the socket");
+        hand.transform.position = new Vector3(0.04f, 0.005f, 0f);
+        Assert.That(filter.Process(nearFar, grab), Is.False, "Too far to the side while seated");
+        Call(part, "Unmount");
+        Physics.SyncTransforms();
+        Assert.That(filter.Process(nearFar, grab), Is.True, "Normal near range after removal");
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator RemovalSettingsAreIndependentPerSocketAndCanLockPart()
+    {
+        GameObject root = CreateObject("PC Components");
+        GameObject cpu = CreateObject("cpu");
+        cpu.transform.SetParent(root.transform, false);
+        cpu.AddComponent<BoxCollider>().size = Vector3.one * 0.02f;
+        Component part = cpu.AddComponent(PartType);
+        XRGrabInteractable grab = cpu.GetComponent<XRGrabInteractable>();
+        Type filterType = Type.GetType("NearOnlyGrabFilter, Assembly-CSharp", true);
+        IXRSelectFilter nearFilter = (IXRSelectFilter)root.AddComponent(filterType);
+        Component cpuSlot = CreateSlot("cpu socket", Vector3.zero, Quaternion.identity);
+        Component otherSlot = CreateSlot("other socket", new Vector3(1f, 0f, 0f), Quaternion.identity);
+        Set(cpuSlot, "limitGrabDistance", true);
+        Set(cpuSlot, "requireApproachDirection", true);
+        Assert.That((bool)Call(cpuSlot, "TrySeat", part), Is.True);
+
+        GameObject hand = CreateObject("hand");
+        NearFarInteractor nearFar = hand.AddComponent<NearFarInteractor>();
+        SphereInteractionCaster sphere = (SphereInteractionCaster)nearFar.nearInteractionCaster;
+        sphere.castRadius = 0.1f;
+        sphere.castOrigin = hand.transform;
+        hand.transform.position = new Vector3(0f, -0.02f, 0f);
+        Physics.SyncTransforms();
+        Assert.That(nearFilter.Process(nearFar, grab), Is.False, "CPU rejects behind");
+        Assert.That((bool)Call(otherSlot, "CanRemoveFrom", hand.transform.position, grab), Is.True,
+            "Other socket defaults to proximity-only");
+
+        hand.transform.position = new Vector3(0f, 0.02f, 0f);
+        Set(cpuSlot, "allowRemoval", false);
+        Assert.That(nearFilter.Process(nearFar, grab), Is.False);
+        Assert.That(((IXRSelectFilter)part).Process(nearFar, grab), Is.False,
+            "Non-removable policy also blocks selection without the group filter");
+
+        Set(cpuSlot, "allowRemoval", true);
+        Set(cpuSlot, "limitGrabDistance", false);
+        Transform sideApproach = CreateObject("side approach").transform;
+        sideApproach.rotation = Quaternion.Euler(0f, 0f, 90f);
+        Set(cpuSlot, "removalApproach", sideApproach);
+        GameObject regionObject = CreateObject("grip region");
+        regionObject.transform.position = new Vector3(-0.005f, 0f, 0f);
+        SphereCollider region = regionObject.AddComponent<SphereCollider>();
+        region.radius = 0.006f;
+        region.isTrigger = true;
+        Set(cpuSlot, "removalGripRegion", region);
+        Physics.SyncTransforms();
+        Assert.That((bool)Call(cpuSlot, "CanRemoveFrom", new Vector3(-0.005f, 0f, 0f), grab), Is.True);
+        Assert.That((bool)Call(cpuSlot, "CanRemoveFrom", new Vector3(0.005f, 0f, 0f), grab), Is.False,
+            "Wrong side of approach plane");
+        Assert.That((bool)Call(cpuSlot, "CanRemoveFrom", new Vector3(-0.03f, 0f, 0f), grab), Is.False,
+            "Outside grip region");
+        yield return null;
+    }
+
     [TearDown]
     public void Cleanup()
     {

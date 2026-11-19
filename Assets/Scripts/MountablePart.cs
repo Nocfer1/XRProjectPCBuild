@@ -2,10 +2,12 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
+using UnityEngine.XR.Interaction.Toolkit.Filtering;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 [RequireComponent(typeof(XRGrabInteractable), typeof(Rigidbody))]
-public class MountablePart : MonoBehaviour
+public class MountablePart : MonoBehaviour, IXRSelectFilter
 {
     [Header("Component Data")]
     public SlotType compatibleSlotType;
@@ -20,6 +22,7 @@ public class MountablePart : MonoBehaviour
     public SnapPoint MountedSlot { get; private set; }
     public bool IsMounted => MountedSlot != null;
     public Transform AlignmentPivot => alignmentPivot != null ? alignmentPivot : transform;
+    public bool canProcess => isActiveAndEnabled;
 
     private XRGrabInteractable grabInteractable;
     private Rigidbody partRigidbody;
@@ -41,16 +44,36 @@ public class MountablePart : MonoBehaviour
     {
         grabInteractable.selectEntered.AddListener(OnGrabbed);
         grabInteractable.selectExited.AddListener(OnReleased);
+        grabInteractable.selectFilters.Add(this);
     }
 
     private void OnDisable()
     {
         grabInteractable.selectEntered.RemoveListener(OnGrabbed);
         grabInteractable.selectExited.RemoveListener(OnReleased);
+        grabInteractable.selectFilters.Remove(this);
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
         Unmount();
         RestoreAfterGrab();
+    }
+
+    public bool Process(IXRSelectInteractor interactor, IXRSelectInteractable interactable)
+    {
+        if (!IsMounted || interactor.IsSelecting(interactable)) return true;
+        return MountedSlot.CanRemoveFrom(GetInteractorPosition(interactor, interactable), grabInteractable);
+    }
+
+    public static Vector3 GetInteractorPosition(IXRInteractor interactor, IXRInteractable interactable)
+    {
+        if (interactor is NearFarInteractor nearFar && nearFar.nearInteractionCaster != null)
+        {
+            var caster = nearFar.nearInteractionCaster;
+            Transform origin = caster.effectiveCastOrigin != null ? caster.effectiveCastOrigin : caster.castOrigin;
+            if (origin != null) return origin.position;
+        }
+        if (interactor is XRDirectInteractor direct) return direct.GetAttachTransform(interactable).position;
+        return interactor.transform.position;
     }
 
     private void OnGrabbed(SelectEnterEventArgs args)

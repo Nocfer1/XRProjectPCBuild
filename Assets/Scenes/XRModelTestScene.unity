@@ -5310,13 +5310,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2094032187}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
   m_LocalPosition: {x: 0.655, y: 0.179, z: 0.16}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1718365844}
-  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 90}
 --- !u!114 &2094032189
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5333,6 +5333,12 @@ MonoBehaviour:
   snapTransform: {fileID: 0}
   maxPositionError: 0.015
   minOrientationAlignment: 0.95
+  allowRemoval: 1
+  limitGrabDistance: 1
+  mountedGrabDistance: 0.015
+  requireApproachDirection: 1
+  removalApproach: {fileID: 0}
+  removalGripRegion: {fileID: 0}
 --- !u!65 &2094032190
 BoxCollider:
   m_ObjectHideFlags: 0
