@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
@@ -28,6 +29,7 @@ public class MountablePart : MonoBehaviour
     private bool usedGravity;
     private bool retainParentBeforeMount;
     private bool restoreAfterGrab;
+    private readonly List<(Collider part, Collider host)> ignoredHostCollisions = new List<(Collider, Collider)>();
 
     private void Awake()
     {
@@ -150,6 +152,7 @@ public class MountablePart : MonoBehaviour
         }
         partRigidbody.isKinematic = true;
         partRigidbody.useGravity = false;
+        IgnoreHostCollisions(slot);
         transform.SetParent(target, true);
         transform.SetPositionAndRotation(targetPosition, targetRotation);
         MountedSlot = slot;
@@ -163,6 +166,7 @@ public class MountablePart : MonoBehaviour
         MountedSlot = null;
         slot.ClearSeat(this);
         transform.SetParent(parentBeforeMount, true);
+        RestoreHostCollisions();
         if (grabInteractable.isSelected)
         {
             // Grab() already captured the seated Rigidbody and parent. Restore the
@@ -185,5 +189,38 @@ public class MountablePart : MonoBehaviour
         partRigidbody.useGravity = usedGravity;
         grabInteractable.retainTransformParent = retainParentBeforeMount;
         restoreAfterGrab = false;
+    }
+
+    private void IgnoreHostCollisions(SnapPoint slot)
+    {
+        Rigidbody host = slot.GetComponentInParent<Rigidbody>();
+        if (host == null || host == partRigidbody) return;
+
+        Collider[] partColliders = GetComponentsInChildren<Collider>(true);
+        Collider[] hostColliders = host.GetComponentsInChildren<Collider>(true);
+        foreach (Collider partCollider in partColliders)
+        {
+            if (!partCollider.enabled || !partCollider.gameObject.activeInHierarchy ||
+                partCollider.attachedRigidbody != partRigidbody || partCollider.isTrigger) continue;
+            foreach (Collider hostCollider in hostColliders)
+            {
+                if (!hostCollider.enabled || !hostCollider.gameObject.activeInHierarchy ||
+                    hostCollider.attachedRigidbody != host || hostCollider.isTrigger ||
+                    Physics.GetIgnoreCollision(partCollider, hostCollider)) continue;
+                Physics.IgnoreCollision(partCollider, hostCollider, true);
+                ignoredHostCollisions.Add((partCollider, hostCollider));
+            }
+        }
+    }
+
+    private void RestoreHostCollisions()
+    {
+        foreach (var pair in ignoredHostCollisions)
+        {
+            if (pair.part != null && pair.host != null && pair.part.gameObject.activeInHierarchy &&
+                pair.host.gameObject.activeInHierarchy)
+                Physics.IgnoreCollision(pair.part, pair.host, false);
+        }
+        ignoredHostCollisions.Clear();
     }
 }

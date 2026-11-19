@@ -125,6 +125,7 @@ public static class XRModelTestSceneBuilder
         };
 
         var root = new GameObject("PC Components");
+        root.AddComponent<NearOnlyGrabFilter>();
         for (var i = 0; i < paths.Length; i++)
         {
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(paths[i]);
