@@ -45,7 +45,7 @@ public class NearOnlyGrabFilter : MonoBehaviour, IXRHoverFilter, IXRSelectFilter
         return IsNear(interactor, interactable as XRGrabInteractable);
     }
 
-    private static bool IsNear(IXRInteractor interactor, XRGrabInteractable grab)
+    private bool IsNear(IXRInteractor interactor, XRGrabInteractable grab)
     {
         if (grab == null) return true;
 
@@ -57,17 +57,30 @@ public class NearOnlyGrabFilter : MonoBehaviour, IXRHoverFilter, IXRSelectFilter
             Transform origin = sphere.effectiveCastOrigin != null ? sphere.effectiveCastOrigin : sphere.castOrigin;
             if (origin == null) origin = nearFar.transform;
             float radius = sphere.castRadius * Mathf.Abs(sphere.transform.lossyScale.x);
-            Vector3 position = origin.position;
-            foreach (Collider collider in grab.colliders)
-            {
-                if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) continue;
-                if ((collider.ClosestPoint(position) - position).sqrMagnitude <= radius * radius)
-                    return true;
-            }
-            return false;
+            return IsWithinGrabRange(grab, origin.position, radius);
         }
 
-        // Direct hands and sockets are local; reject ray, gaze and unknown remote interactors.
-        return interactor is XRDirectInteractor || interactor is XRSocketInteractor;
+        if (interactor is XRSocketInteractor) return true;
+        if (interactor is XRDirectInteractor direct)
+        {
+            MountablePart part = grab.GetComponent<MountablePart>();
+            return part == null || !part.IsMounted ||
+                   part.MountedSlot.CanRemoveFrom(direct.GetAttachTransform(grab).position, grab);
+        }
+        return false;
+    }
+
+    private bool IsWithinGrabRange(XRGrabInteractable grab, Vector3 position, float radius)
+    {
+        MountablePart part = grab.GetComponent<MountablePart>();
+        if (part != null && part.IsMounted && !part.MountedSlot.CanRemoveFrom(position, grab)) return false;
+
+        foreach (Collider collider in grab.colliders)
+        {
+            if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) continue;
+            if ((collider.ClosestPoint(position) - position).sqrMagnitude <= radius * radius)
+                return true;
+        }
+        return false;
     }
 }
