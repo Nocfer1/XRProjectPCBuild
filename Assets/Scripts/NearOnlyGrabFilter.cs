@@ -45,7 +45,8 @@ public class NearOnlyGrabFilter : MonoBehaviour, IXRHoverFilter, IXRSelectFilter
         return IsNear(interactor, interactable as XRGrabInteractable);
     }
 
-    private bool IsNear(IXRInteractor interactor, XRGrabInteractable grab)
+    // Distance only. Where a seated part may be taken from is MountablePart's own hover/select filter.
+    private static bool IsNear(IXRInteractor interactor, XRGrabInteractable grab)
     {
         if (grab == null) return true;
 
@@ -53,34 +54,11 @@ public class NearOnlyGrabFilter : MonoBehaviour, IXRHoverFilter, IXRSelectFilter
         {
             if (!nearFar.enableNearCasting || !(nearFar.nearInteractionCaster is SphereInteractionCaster sphere))
                 return false;
-
-            Transform origin = sphere.effectiveCastOrigin != null ? sphere.effectiveCastOrigin : sphere.castOrigin;
-            if (origin == null) origin = nearFar.transform;
             float radius = sphere.castRadius * Mathf.Abs(sphere.transform.lossyScale.x);
-            return IsWithinGrabRange(grab, origin.position, radius);
+            return GrabUtility.AnyColliderWithin(grab, GrabUtility.GetInteractorPosition(nearFar, grab), radius);
         }
 
-        if (interactor is XRSocketInteractor) return true;
-        if (interactor is XRDirectInteractor direct)
-        {
-            MountablePart part = grab.GetComponent<MountablePart>();
-            return part == null || !part.IsMounted ||
-                   part.MountedSlot.CanRemoveFrom(direct.GetAttachTransform(grab).position, grab);
-        }
-        return false;
-    }
-
-    private bool IsWithinGrabRange(XRGrabInteractable grab, Vector3 position, float radius)
-    {
-        MountablePart part = grab.GetComponent<MountablePart>();
-        if (part != null && part.IsMounted && !part.MountedSlot.CanRemoveFrom(position, grab)) return false;
-
-        foreach (Collider collider in grab.colliders)
-        {
-            if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) continue;
-            if ((collider.ClosestPoint(position) - position).sqrMagnitude <= radius * radius)
-                return true;
-        }
-        return false;
+        // Direct and socket interactors can only reach what they touch.
+        return interactor is XRDirectInteractor || interactor is XRSocketInteractor;
     }
 }

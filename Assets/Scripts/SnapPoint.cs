@@ -21,6 +21,7 @@ public class SnapPoint : MonoBehaviour
 
     public static event Action<AssemblyOrderViolation> OrderRejected;
     private static readonly HashSet<SnapPoint> activeSlots = new HashSet<SnapPoint>();
+    private bool vacating;
 
     [Header("Precision Tolerances")]
     [Min(0f)] public float maxPositionError = 0.015f;
@@ -73,7 +74,8 @@ public class SnapPoint : MonoBehaviour
     {
         foreach (SnapPoint required in requiredOccupiedSlots)
         {
-            if (required == null || required == this || !required.isOccupied)
+            // Empty or self references are configuration mistakes (see OnValidate), not blockers.
+            if (required != null && required != this && !required.isOccupied)
             {
                 missing = required;
                 return true;
@@ -118,7 +120,7 @@ public class SnapPoint : MonoBehaviour
     {
         if (!allowRemoval || grab == null) return false;
 
-        Transform approach = removalApproach != null ? removalApproach : Target;
+        Transform approach = RemovalDirection;
         if (requireApproachDirection && Vector3.Dot(controllerPosition - approach.position, approach.up) < 0f)
             return false;
 
@@ -129,20 +131,15 @@ public class SnapPoint : MonoBehaviour
                 return false;
         }
 
-        if (!limitGrabDistance) return true;
-        float maxDistanceSquared = mountedGrabDistance * mountedGrabDistance;
-        foreach (Collider collider in grab.colliders)
-        {
-            if (collider != null && collider.enabled && collider.gameObject.activeInHierarchy &&
-                (collider.ClosestPoint(controllerPosition) - controllerPosition).sqrMagnitude <= maxDistanceSquared)
-                return true;
-        }
-        return false;
+        return !limitGrabDistance || GrabUtility.AnyColliderWithin(grab, controllerPosition, mountedGrabDistance);
     }
 
-    public bool TrySeat(MountablePart part)
+    public bool TrySeat(MountablePart part) => TrySeat(part, true);
+
+    // requirePrecisionFit is false for parts placed by code (initial slots); seating aligns them anyway.
+    internal bool TrySeat(MountablePart part, bool requirePrecisionFit)
     {
-        if (!CanConsider(part) || !EvaluatePrecisionFit(part.AlignmentPivot)) return false;
+        if (!CanConsider(part) || (requirePrecisionFit && !EvaluatePrecisionFit(part.AlignmentPivot))) return false;
         if (TryGetMissingPrerequisite(out var missing))
         {
             ReportOrderRejected(AssemblyOrderViolationKind.MissingPrerequisite, part, missing);
@@ -158,11 +155,40 @@ public class SnapPoint : MonoBehaviour
         if (SeatedPart == part) SeatedPart = null;
     }
 
+    // Removes the seated part without the order check. Occupied slots that depend on this one
+    // are vacated first, so no part is left mounted without its prerequisite.
+    internal void Vacate()
+    {
+        if (SeatedPart == null || vacating) return;
+        vacating = true;
+        try
+        {
+            var dependents = new List<SnapPoint>();
+            foreach (SnapPoint other in activeSlots)
+                if (other != this && other.isOccupied && other.requiredOccupiedSlots.Contains(this))
+                    dependents.Add(other);
+            foreach (SnapPoint dependent in dependents) dependent.Vacate();
+            if (SeatedPart != null) SeatedPart.ForceUnmount();
+        }
+        finally { vacating = false; }
+    }
+
     private void OnEnable() => activeSlots.Add(this);
 
     private void OnDisable()
     {
+        Vacate();
         activeSlots.Remove(this);
-        if (SeatedPart != null) SeatedPart.ForceUnmount();
+    }
+
+    private void OnValidate()
+    {
+        foreach (SnapPoint required in requiredOccupiedSlots)
+        {
+            if (required == null)
+                Debug.LogWarning($"{name}: Required Occupied Slots has an empty entry; it is ignored.", this);
+            else if (required == this)
+                Debug.LogWarning($"{name}: Required Occupied Slots lists this slot itself; it is ignored.", this);
+        }
     }
 }

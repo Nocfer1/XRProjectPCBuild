@@ -9,7 +9,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 [RequireComponent(typeof(XRGrabInteractable), typeof(Rigidbody))]
 [DefaultExecutionOrder(1000)]
-public class MountablePart : MonoBehaviour, IXRSelectFilter
+public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
 {
     [Header("Component Data")]
     public SlotType compatibleSlotType;
@@ -30,18 +30,68 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     public Transform AlignmentPivot => alignmentPivot != null ? alignmentPivot : transform;
     public bool canProcess => isActiveAndEnabled;
 
+    // What the part looked like before it was seated, restored when it leaves the slot.
+    private struct PreMountState
+    {
+        public Transform parent;
+        public bool isKinematic;
+        public bool useGravity;
+        public bool retainTransformParent;
+
+        public static PreMountState Capture(Transform transform, Rigidbody body, XRGrabInteractable grab) =>
+            new PreMountState
+            {
+                parent = transform.parent,
+                isKinematic = body.isKinematic,
+                useGravity = body.useGravity,
+                retainTransformParent = grab.retainTransformParent
+            };
+
+        public void RestoreBody(Rigidbody body, XRGrabInteractable grab)
+        {
+            body.isKinematic = isKinematic;
+            body.useGravity = useGravity;
+            grab.retainTransformParent = retainTransformParent;
+        }
+    }
+
+    // Grab settings overridden while a hand holds the part in its slot.
+    private struct GripOverride
+    {
+        public bool trackPosition;
+        public bool trackRotation;
+        public bool throwOnDetach;
+
+        public static GripOverride Capture(XRGrabInteractable grab) =>
+            new GripOverride
+            {
+                trackPosition = grab.trackPosition,
+                trackRotation = grab.trackRotation,
+                throwOnDetach = grab.throwOnDetach
+            };
+
+        public void Restore(XRGrabInteractable grab)
+        {
+            grab.trackPosition = trackPosition;
+            grab.trackRotation = trackRotation;
+            grab.throwOnDetach = throwOnDetach;
+        }
+    }
+
+    // Shared, reused buffers: these queries never run re-entrantly, so one set avoids per-call garbage.
+    private static readonly Collider[] overlapBuffer = new Collider[64];
+    private static readonly List<Collider> partColliderBuffer = new List<Collider>();
+    private static readonly List<Collider> hostColliderBuffer = new List<Collider>();
+    private static readonly List<MountablePart> assemblyBuffer = new List<MountablePart>();
+    private static readonly WaitForEndOfFrame endOfFrame = new WaitForEndOfFrame();
+
     private XRGrabInteractable grabInteractable;
     private Rigidbody partRigidbody;
     private Coroutine pendingRelease;
-    private Transform parentBeforeMount;
-    private bool wasKinematic;
-    private bool usedGravity;
-    private bool retainParentBeforeMount;
+    private PreMountState preMount;
+    private GripOverride? seatedGrip; // Set while a hand holds the part in its slot.
     private bool restoreAfterGrab;
-    private bool seatedGripActive;
-    private bool savedTrackPosition;
-    private bool savedTrackRotation;
-    private bool savedThrowOnDetach;
+    private XRGrabInteractable hostGrab;
     private IXRSelectInteractor pullingInteractor;
     private Vector3 pullStartInTargetSpace;
     private float pullTimer;
@@ -61,29 +111,16 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         grabInteractable.selectEntered.AddListener(OnGrabbed);
         grabInteractable.selectExited.AddListener(OnReleased);
         grabInteractable.selectFilters.Add(this);
+        grabInteractable.hoverFilters.Add(this);
     }
 
     private void Start()
     {
         if (initialSlot == null) return;
         if (!initialSlot.CanAccept(this))
-        {
             Debug.LogWarning($"{name}: Initial slot {initialSlot.name} is unavailable or incompatible.", this);
-            return;
-        }
-
-        Vector3 originalPosition = transform.position;
-        Quaternion originalRotation = transform.rotation;
-        Transform pivot = AlignmentPivot;
-        Transform target = initialSlot.Target;
-        Quaternion rotationDelta = target.rotation * Quaternion.Inverse(pivot.rotation);
-        transform.SetPositionAndRotation(target.position + rotationDelta * (transform.position - pivot.position),
-            rotationDelta * transform.rotation);
-        if (!initialSlot.TrySeat(this))
-        {
-            transform.SetPositionAndRotation(originalPosition, originalRotation);
+        else if (!initialSlot.TrySeat(this, false))
             Debug.LogWarning($"{name}: Could not mount in initial slot {initialSlot.name}.", this);
-        }
     }
 
     private void OnDisable()
@@ -91,30 +128,25 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         grabInteractable.selectEntered.RemoveListener(OnGrabbed);
         grabInteractable.selectExited.RemoveListener(OnReleased);
         grabInteractable.selectFilters.Remove(this);
+        grabInteractable.hoverFilters.Remove(this);
         if (pendingRelease != null) StopCoroutine(pendingRelease);
         pendingRelease = null;
         EndSeatedGrip();
-        ForceUnmount();
+        // Vacate also removes parts that depend on this one, keeping the assembly order valid.
+        if (IsMounted) MountedSlot.Vacate();
         RestoreAfterGrab();
     }
 
-    public bool Process(IXRSelectInteractor interactor, IXRSelectInteractable interactable)
-    {
-        if (!IsMounted || interactor.IsSelecting(interactable)) return true;
-        return MountedSlot.CanRemoveFrom(GetInteractorPosition(interactor, interactable), grabInteractable);
-    }
+    // A seated part can only be hovered or grabbed from where its slot allows removal.
+    public bool Process(IXRSelectInteractor interactor, IXRSelectInteractable interactable) =>
+        interactor.IsSelecting(interactable) || CanBeTakenBy(interactor, interactable);
 
-    public static Vector3 GetInteractorPosition(IXRInteractor interactor, IXRInteractable interactable)
-    {
-        if (interactor is NearFarInteractor nearFar && nearFar.nearInteractionCaster != null)
-        {
-            var caster = nearFar.nearInteractionCaster;
-            Transform origin = caster.effectiveCastOrigin != null ? caster.effectiveCastOrigin : caster.castOrigin;
-            if (origin != null) return origin.position;
-        }
-        if (interactor is XRDirectInteractor direct) return direct.GetAttachTransform(interactable).position;
-        return interactor.transform.position;
-    }
+    public bool Process(IXRHoverInteractor interactor, IXRHoverInteractable interactable) =>
+        (interactor is IXRSelectInteractor selecting && interactable is IXRSelectInteractable selectable &&
+         selecting.IsSelecting(selectable)) || CanBeTakenBy(interactor, interactable);
+
+    private bool CanBeTakenBy(IXRInteractor interactor, IXRInteractable interactable) =>
+        !IsMounted || MountedSlot.CanRemoveFrom(GrabUtility.GetInteractorPosition(interactor, interactable), grabInteractable);
 
     private void OnGrabbed(SelectEnterEventArgs args)
     {
@@ -123,25 +155,22 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         if (!IsMounted) return;
         if (MountedSlot.TryGetBlockingDependent(out var blocker))
         {
-            if (!seatedGripActive) BeginSeatedGrip(args.interactorObject);
-            else MaintainSeatedGrip();
+            HoldInSlot(args.interactorObject);
             ReportRemovalBlocker(blocker);
             return;
         }
-        if (MountedSlot.requirePullToRemove)
-        {
-            if (!seatedGripActive) BeginSeatedGrip(args.interactorObject);
-            else MaintainSeatedGrip();
-        }
+        if (MountedSlot.requirePullToRemove) HoldInSlot(args.interactorObject);
         else Unmount();
     }
 
-    private void BeginSeatedGrip(IXRSelectInteractor interactor)
+    private void HoldInSlot(IXRSelectInteractor interactor)
     {
-        seatedGripActive = true;
-        savedTrackPosition = grabInteractable.trackPosition;
-        savedTrackRotation = grabInteractable.trackRotation;
-        savedThrowOnDetach = grabInteractable.throwOnDetach;
+        if (seatedGrip.HasValue)
+        {
+            MaintainSeatedGrip();
+            return;
+        }
+        seatedGrip = GripOverride.Capture(grabInteractable);
         MaintainSeatedGrip();
         pullingInteractor = interactor;
         ResetPullBaseline();
@@ -160,7 +189,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
 
     private void Update()
     {
-        if (!seatedGripActive || !IsMounted || !grabInteractable.isSelected) return;
+        if (!seatedGrip.HasValue || !IsMounted || !grabInteractable.isSelected) return;
         if (pullingInteractor == null || !pullingInteractor.IsSelecting(grabInteractable))
         {
             pullingInteractor = grabInteractable.interactorsSelecting[0];
@@ -187,7 +216,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         }
 
         if (!pullBaselineReady) ResetPullBaseline();
-        Vector3 handPosition = GetInteractorPosition(pullingInteractor, grabInteractable);
+        Vector3 handPosition = GrabUtility.GetInteractorPosition(pullingInteractor, grabInteractable);
         float distance = MountedSlot.MeasurePullDistance(pullStartInTargetSpace, handPosition);
         if (distance > 0.003f && Time.time >= nextPullHapticTime)
         {
@@ -207,22 +236,24 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     {
         if (!IsMounted) return;
 
-        // Other parts can be attached to this part after it was seated. Keep
-        // those descendants from pushing against the same host as the assembly.
-        IgnoreHostCollisions(MountedSlot);
-
         // A mounted part has its own kinematic Rigidbody. Keep its physics pose
         // aligned to the moving host as well as maintaining the transform parent.
         Transform target = MountedSlot.Target;
         if (transform.parent != target)
             transform.SetParent(target, true);
-        Transform pivot = AlignmentPivot;
-        Quaternion delta = target.rotation * Quaternion.Inverse(pivot.rotation);
-        Vector3 position = target.position + delta * (transform.position - pivot.position);
-        Quaternion rotation = delta * transform.rotation;
+        GetSeatedPose(target, out Vector3 position, out Quaternion rotation);
         transform.SetPositionAndRotation(position, rotation);
         partRigidbody.position = position;
         partRigidbody.rotation = rotation;
+    }
+
+    // Root pose that puts the alignment pivot exactly on the target.
+    private void GetSeatedPose(Transform target, out Vector3 position, out Quaternion rotation)
+    {
+        Transform pivot = AlignmentPivot;
+        Quaternion delta = target.rotation * Quaternion.Inverse(pivot.rotation);
+        position = target.position + delta * (transform.position - pivot.position);
+        rotation = delta * transform.rotation;
     }
 
     private static void SendPullHaptic(IXRInteractor interactor, float amplitude, float duration)
@@ -241,9 +272,8 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
 
     private bool IsHostHeldByAnotherInteractor()
     {
-        XRGrabInteractable host = MountedSlot.GetComponentInParent<XRGrabInteractable>();
-        if (host == null) return false;
-        foreach (var interactor in host.interactorsSelecting)
+        if (hostGrab == null) return false;
+        foreach (var interactor in hostGrab.interactorsSelecting)
             if (interactor != pullingInteractor) return true;
         return false;
     }
@@ -253,17 +283,16 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         pullTimer = 0f;
         pullBaselineReady = pullingInteractor != null && IsMounted;
         if (pullBaselineReady)
-            pullStartInTargetSpace = MountedSlot.Target.InverseTransformPoint(GetInteractorPosition(pullingInteractor, grabInteractable));
+            pullStartInTargetSpace = MountedSlot.Target.InverseTransformPoint(
+                GrabUtility.GetInteractorPosition(pullingInteractor, grabInteractable));
     }
 
     private void EndSeatedGrip()
     {
-        if (!seatedGripActive) return;
-        grabInteractable.trackPosition = savedTrackPosition;
-        grabInteractable.trackRotation = savedTrackRotation;
-        grabInteractable.throwOnDetach = savedThrowOnDetach;
-        grabInteractable.retainTransformParent = retainParentBeforeMount;
-        seatedGripActive = false;
+        if (!seatedGrip.HasValue) return;
+        seatedGrip.Value.Restore(grabInteractable);
+        grabInteractable.retainTransformParent = preMount.retainTransformParent;
+        seatedGrip = null;
         pullingInteractor = null;
         pullBaselineReady = false;
         pullTimer = 0f;
@@ -293,7 +322,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     private IEnumerator FinishRelease()
     {
         // XR Grab completes its detach in Late update, after selectExited.
-        yield return new WaitForEndOfFrame();
+        yield return endOfFrame;
         pendingRelease = null;
         if (grabInteractable.isSelected) yield break;
 
@@ -305,22 +334,9 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             yield break;
         }
         RestoreAfterGrab();
-        Vector3 angularBefore = partRigidbody.angularVelocity;
         if (!grabInteractable.throwOnDetach && !partRigidbody.isKinematic)
             partRigidbody.angularVelocity = Vector3.zero;
-        if (logSnapDiagnostics)
-            Debug.Log($"{name}: Release rotation: before={angularBefore}, after={partRigidbody.angularVelocity}, " +
-                $"kinematic={partRigidbody.isKinematic}, throwOnDetach={grabInteractable.throwOnDetach}.", this);
         TryMountToNearbySlot();
-
-        if (logSnapDiagnostics && !IsMounted)
-        {
-            yield return new WaitForFixedUpdate();
-            yield return new WaitForFixedUpdate();
-            if (!grabInteractable.isSelected && !IsMounted)
-                Debug.Log($"{name}: Rotation after physics: angularVelocity={partRigidbody.angularVelocity}, " +
-                    $"kinematic={partRigidbody.isKinematic}.", this);
-        }
     }
 
     public bool TryMountToNearbySlot()
@@ -328,7 +344,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         if (IsMounted || grabInteractable.isSelected) return false;
         Physics.SyncTransforms();
         Transform pivot = AlignmentPivot;
-        Collider[] hits = Physics.OverlapSphere(pivot.position, snapSearchRadius,
+        int hitCount = Physics.OverlapSphereNonAlloc(pivot.position, snapSearchRadius, overlapBuffer,
             Physics.AllLayers, QueryTriggerInteraction.Collide);
         SnapPoint bestFit = null;
         SnapPoint nearest = null;
@@ -338,13 +354,16 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         float nearestDistance = float.MaxValue;
         float blockedDistance = float.MaxValue;
 
-        foreach (Collider hit in hits)
+        for (int i = 0; i < hitCount; i++)
         {
-            SnapPoint slot = hit.GetComponentInParent<SnapPoint>();
+            SnapPoint slot = overlapBuffer[i].GetComponentInParent<SnapPoint>();
             if (slot == null || !slot.CanConsider(this)) continue;
             float distance = Vector3.Distance(pivot.position, slot.Target.position);
             if (distance < nearestDistance) { nearest = slot; nearestDistance = distance; }
-            if (distance <= slot.maxPositionError && slot.TryGetMissingPrerequisite(out var missing))
+            // Only a part that would actually fit is reported as blocked by assembly order;
+            // a badly rotated part falls through to the normal "snap rejected" diagnostics.
+            if (!slot.EvaluatePrecisionFit(pivot)) continue;
+            if (slot.TryGetMissingPrerequisite(out var missing))
             {
                 if (distance < blockedDistance)
                 {
@@ -354,12 +373,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
                 }
                 continue;
             }
-            if (distance < bestDistance && slot.EvaluatePrecisionFit(pivot))
+            if (distance < bestDistance)
             {
                 bestFit = slot;
                 bestDistance = distance;
             }
         }
+        System.Array.Clear(overlapBuffer, 0, hitCount);
 
         if (bestFit != null && bestFit.TrySeat(this)) return true;
         if (blockedFit != null)
@@ -382,17 +402,10 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     internal bool SeatIn(SnapPoint slot)
     {
         if (IsMounted || slot == null || grabInteractable.isSelected) return false;
-        Transform pivot = AlignmentPivot;
         Transform target = slot.Target;
-        Quaternion rotationDelta = target.rotation * Quaternion.Inverse(pivot.rotation);
-        Vector3 rootOffset = transform.position - pivot.position;
-        Vector3 targetPosition = target.position + rotationDelta * rootOffset;
-        Quaternion targetRotation = rotationDelta * transform.rotation;
+        GetSeatedPose(target, out Vector3 targetPosition, out Quaternion targetRotation);
 
-        parentBeforeMount = transform.parent;
-        wasKinematic = partRigidbody.isKinematic;
-        usedGravity = partRigidbody.useGravity;
-        retainParentBeforeMount = grabInteractable.retainTransformParent;
+        preMount = PreMountState.Capture(transform, partRigidbody, grabInteractable);
         if (!partRigidbody.isKinematic)
         {
             partRigidbody.linearVelocity = Vector3.zero;
@@ -400,10 +413,11 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         }
         partRigidbody.isKinematic = true;
         partRigidbody.useGravity = false;
-        IgnoreHostCollisions(slot);
         transform.SetParent(target, true);
         transform.SetPositionAndRotation(targetPosition, targetRotation);
         MountedSlot = slot;
+        hostGrab = slot.GetComponentInParent<XRGrabInteractable>();
+        RefreshAssemblyCollisions(transform);
         return true;
     }
 
@@ -421,13 +435,19 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     internal void ForceUnmount()
     {
         if (!IsMounted) return;
-        bool resumeHeldBody = seatedGripActive && grabInteractable.isSelected;
+        bool resumeHeldBody = seatedGrip.HasValue && grabInteractable.isSelected;
         EndSeatedGrip();
         SnapPoint slot = MountedSlot;
         MountedSlot = null;
+        hostGrab = null;
         slot.ClearSeat(this);
-        transform.SetParent(parentBeforeMount, true);
+        // Unity forbids reparenting while this hierarchy is being deactivated or destroyed
+        // (for example the case is disabled with parts inside); the part then stays with its host.
+        if (gameObject.activeInHierarchy)
+            transform.SetParent(preMount.parent, true);
         RestoreHostCollisions();
+        // The assembly this part just left no longer needs its colliders ignored.
+        RefreshAssemblyCollisions(slot.Target);
         if (grabInteractable.isSelected)
         {
             // Grab() already captured the seated Rigidbody and parent. Restore the
@@ -438,9 +458,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         }
         else
         {
-            partRigidbody.isKinematic = wasKinematic;
-            partRigidbody.useGravity = usedGravity;
-            grabInteractable.retainTransformParent = retainParentBeforeMount;
+            preMount.RestoreBody(partRigidbody, grabInteractable);
         }
     }
 
@@ -459,10 +477,20 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     private void RestoreAfterGrab()
     {
         if (!restoreAfterGrab) return;
-        partRigidbody.isKinematic = wasKinematic;
-        partRigidbody.useGravity = usedGravity;
-        grabInteractable.retainTransformParent = retainParentBeforeMount;
+        preMount.RestoreBody(partRigidbody, grabInteractable);
         restoreAfterGrab = false;
+    }
+
+    // Seating or removing a part changes which colliders every mounted part above it carries,
+    // so each of them refreshes its ignored pairs. This runs only when the assembly changes,
+    // not every frame. Colliders toggled at runtime are picked up on the next assembly change.
+    private static void RefreshAssemblyCollisions(Transform from)
+    {
+        if (from == null) return;
+        from.GetComponentsInParent(false, assemblyBuffer);
+        foreach (MountablePart part in assemblyBuffer)
+            if (part.IsMounted) part.IgnoreHostCollisions(part.MountedSlot);
+        assemblyBuffer.Clear();
     }
 
     private void IgnoreHostCollisions(SnapPoint slot)
@@ -485,14 +513,14 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             ignoredHostCollisions.RemoveAt(i);
         }
 
-        Collider[] partColliders = GetComponentsInChildren<Collider>(true);
-        Collider[] hostColliders = host.GetComponentsInChildren<Collider>(true);
-        foreach (Collider partCollider in partColliders)
+        GetComponentsInChildren(true, partColliderBuffer);
+        host.GetComponentsInChildren(true, hostColliderBuffer);
+        foreach (Collider partCollider in partColliderBuffer)
         {
             if (!partCollider.enabled || !partCollider.gameObject.activeInHierarchy ||
                 partCollider.attachedRigidbody == null || partCollider.attachedRigidbody == host ||
                 partCollider.isTrigger) continue;
-            foreach (Collider hostCollider in hostColliders)
+            foreach (Collider hostCollider in hostColliderBuffer)
             {
                 if (!hostCollider.enabled || !hostCollider.gameObject.activeInHierarchy ||
                     hostCollider.attachedRigidbody != host || hostCollider.isTrigger ||
@@ -501,6 +529,8 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
                 ignoredHostCollisions.Add((partCollider, hostCollider));
             }
         }
+        partColliderBuffer.Clear();
+        hostColliderBuffer.Clear();
     }
 
     private void RestoreHostCollisions()
