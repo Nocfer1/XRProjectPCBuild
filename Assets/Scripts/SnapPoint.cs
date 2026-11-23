@@ -21,6 +21,7 @@ public class SnapPoint : MonoBehaviour
 
     public static event Action<AssemblyOrderViolation> OrderRejected;
     private static readonly HashSet<SnapPoint> activeSlots = new HashSet<SnapPoint>();
+    public static IReadOnlyCollection<SnapPoint> ActiveSlots => activeSlots;
     private bool vacating;
 
     [Header("Precision Tolerances")]

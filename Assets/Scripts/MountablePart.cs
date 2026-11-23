@@ -13,6 +13,8 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
 {
     [Header("Component Data")]
     public SlotType compatibleSlotType;
+    [Tooltip("Popup text for this part. When empty, the default Part Info for its slot type is used.")]
+    public PartInfo info;
 
     [Header("Alignment & Detection")]
     [Tooltip("Mating surface pose. Its position and axes must match the socket target when seated. Defaults to this object's transform.")]
@@ -29,6 +31,11 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
     public bool IsMounted => MountedSlot != null;
     public Transform AlignmentPivot => alignmentPivot != null ? alignmentPivot : transform;
     public bool canProcess => isActiveAndEnabled;
+    public XRGrabInteractable Grab => grabInteractable;
+    public Rigidbody Body => partRigidbody;
+    public static IReadOnlyCollection<MountablePart> Active => activeParts;
+
+    private static readonly HashSet<MountablePart> activeParts = new HashSet<MountablePart>();
 
     // What the part looked like before it was seated, restored when it leaves the slot.
     private struct PreMountState
@@ -108,6 +115,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
 
     private void OnEnable()
     {
+        activeParts.Add(this);
         grabInteractable.selectEntered.AddListener(OnGrabbed);
         grabInteractable.selectExited.AddListener(OnReleased);
         grabInteractable.selectFilters.Add(this);
@@ -125,6 +133,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
 
     private void OnDisable()
     {
+        activeParts.Remove(this);
         grabInteractable.selectEntered.RemoveListener(OnGrabbed);
         grabInteractable.selectExited.RemoveListener(OnReleased);
         grabInteractable.selectFilters.Remove(this);

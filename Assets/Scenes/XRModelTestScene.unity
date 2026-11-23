@@ -543,8 +543,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
-  oneHandFollow: 5
-  twoHandFollow: 12
+  strength: 30
+  lightMassPerHand: 1
+  minFollow: 4
+  maxFollow: 20
 --- !u!1 &240191656
 GameObject:
   m_ObjectHideFlags: 0
@@ -1811,6 +1813,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 5
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 0
@@ -2351,8 +2354,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
-  oneHandFollow: 0.1
-  twoHandFollow: 0.1
+  strength: 30
+  lightMassPerHand: 1
+  minFollow: 4
+  maxFollow: 20
 --- !u!1 &924028034
 GameObject:
   m_ObjectHideFlags: 0
@@ -3232,6 +3237,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 0
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
@@ -4905,6 +4911,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 1
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3000000003}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
@@ -5578,6 +5585,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 1
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3100000010}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
@@ -5626,10 +5634,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 2
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3200000003}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
-  initialSlot: {fileID: 3200000022}
+  initialSlot: {fileID: 0}
 --- !u!1 &3200000002
 GameObject:
   m_ObjectHideFlags: 0
@@ -6013,6 +6022,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 4
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3500000003}
   snapSearchRadius: 0.15
   logSnapDiagnostics: 1
@@ -6061,6 +6071,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 6
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3500000013}
   snapSearchRadius: 0.15
   logSnapDiagnostics: 1
@@ -6372,6 +6383,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 7
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 0
