@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
-public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply, CPUCooler, Motherboard }
+public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply, CPUCooler, Motherboard, SSD }
 
 public class SnapPoint : MonoBehaviour
 {

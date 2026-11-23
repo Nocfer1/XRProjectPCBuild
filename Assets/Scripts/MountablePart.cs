@@ -8,6 +8,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 [RequireComponent(typeof(XRGrabInteractable), typeof(Rigidbody))]
+[DefaultExecutionOrder(1000)]
 public class MountablePart : MonoBehaviour, IXRSelectFilter
 {
     [Header("Component Data")]
@@ -19,6 +20,10 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
     [Min(0f)] public float snapSearchRadius = 0.1f;
     [Tooltip("Log why a snap attempt failed when this part is released.")]
     public bool logSnapDiagnostics;
+
+    // XRModelTestScene RAM slots: motherboard-local Z = 0.13 is the visually verified seated depth.
+    [Tooltip("Optional slot occupied when Play starts. The part is aligned and mounted using the normal snap logic.")]
+    public SnapPoint initialSlot;
 
     public SnapPoint MountedSlot { get; private set; }
     public bool IsMounted => MountedSlot != null;
@@ -56,6 +61,29 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         grabInteractable.selectEntered.AddListener(OnGrabbed);
         grabInteractable.selectExited.AddListener(OnReleased);
         grabInteractable.selectFilters.Add(this);
+    }
+
+    private void Start()
+    {
+        if (initialSlot == null) return;
+        if (!initialSlot.CanAccept(this))
+        {
+            Debug.LogWarning($"{name}: Initial slot {initialSlot.name} is unavailable or incompatible.", this);
+            return;
+        }
+
+        Vector3 originalPosition = transform.position;
+        Quaternion originalRotation = transform.rotation;
+        Transform pivot = AlignmentPivot;
+        Transform target = initialSlot.Target;
+        Quaternion rotationDelta = target.rotation * Quaternion.Inverse(pivot.rotation);
+        transform.SetPositionAndRotation(target.position + rotationDelta * (transform.position - pivot.position),
+            rotationDelta * transform.rotation);
+        if (!initialSlot.TrySeat(this))
+        {
+            transform.SetPositionAndRotation(originalPosition, originalRotation);
+            Debug.LogWarning($"{name}: Could not mount in initial slot {initialSlot.name}.", this);
+        }
     }
 
     private void OnDisable()
@@ -173,6 +201,28 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
             SendPullHaptic(pullingInteractor, 0.35f, 0.08f);
             Unmount();
         }
+    }
+
+    private void LateUpdate()
+    {
+        if (!IsMounted) return;
+
+        // Other parts can be attached to this part after it was seated. Keep
+        // those descendants from pushing against the same host as the assembly.
+        IgnoreHostCollisions(MountedSlot);
+
+        // A mounted part has its own kinematic Rigidbody. Keep its physics pose
+        // aligned to the moving host as well as maintaining the transform parent.
+        Transform target = MountedSlot.Target;
+        if (transform.parent != target)
+            transform.SetParent(target, true);
+        Transform pivot = AlignmentPivot;
+        Quaternion delta = target.rotation * Quaternion.Inverse(pivot.rotation);
+        Vector3 position = target.position + delta * (transform.position - pivot.position);
+        Quaternion rotation = delta * transform.rotation;
+        transform.SetPositionAndRotation(position, rotation);
+        partRigidbody.position = position;
+        partRigidbody.rotation = rotation;
     }
 
     private static void SendPullHaptic(IXRInteractor interactor, float amplitude, float duration)
@@ -420,12 +470,28 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter
         Rigidbody host = slot.GetComponentInParent<Rigidbody>();
         if (host == null || host == partRigidbody) return;
 
+        // A descendant can be removed while this assembly remains mounted.
+        // Restore only the pairs this component created once they leave it.
+        for (int i = ignoredHostCollisions.Count - 1; i >= 0; i--)
+        {
+            var pair = ignoredHostCollisions[i];
+            if (pair.part != null && pair.host != null && pair.part.enabled && pair.host.enabled &&
+                pair.part.gameObject.activeInHierarchy && pair.host.gameObject.activeInHierarchy &&
+                pair.part.transform.IsChildOf(transform) && pair.host.attachedRigidbody == host)
+                continue;
+            if (pair.part != null && pair.host != null && pair.part.gameObject.activeInHierarchy &&
+                pair.host.gameObject.activeInHierarchy)
+                Physics.IgnoreCollision(pair.part, pair.host, false);
+            ignoredHostCollisions.RemoveAt(i);
+        }
+
         Collider[] partColliders = GetComponentsInChildren<Collider>(true);
         Collider[] hostColliders = host.GetComponentsInChildren<Collider>(true);
         foreach (Collider partCollider in partColliders)
         {
             if (!partCollider.enabled || !partCollider.gameObject.activeInHierarchy ||
-                partCollider.attachedRigidbody != partRigidbody || partCollider.isTrigger) continue;
+                partCollider.attachedRigidbody == null || partCollider.attachedRigidbody == host ||
+                partCollider.isTrigger) continue;
             foreach (Collider hostCollider in hostColliders)
             {
                 if (!hostCollider.enabled || !hostCollider.gameObject.activeInHierarchy ||
