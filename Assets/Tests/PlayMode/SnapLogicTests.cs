@@ -350,15 +350,16 @@ public class SnapLogicTests
     }
 
     [UnityTest]
-    public IEnumerator HeftUsesLighterFollowForTwoHandsAndRestoresSettings()
+    public IEnumerator HeftFollowsMassSharesWeightBetweenHandsAndRestoresSettings()
     {
         XRInteractionManager manager = GetInteractionManager();
         TestGrabInteractor first = CreateObject("first").AddComponent<TestGrabInteractor>();
         TestGrabInteractor second = CreateObject("second").AddComponent<TestGrabInteractor>();
-        GameObject obj = CreateObject("heavy object");
+        GameObject obj = CreateObject("case");
         obj.AddComponent<BoxCollider>();
         XRGrabInteractable grab = obj.AddComponent<XRGrabInteractable>();
         grab.selectMode = InteractableSelectMode.Multiple;
+        obj.GetComponent<Rigidbody>().mass = 6f;
         bool originalSmooth = grab.smoothPosition;
         float originalAmount = grab.smoothPositionAmount;
         Type heftType = Type.GetType("GrabHeft, Assembly-CSharp", true);
@@ -366,15 +367,48 @@ public class SnapLogicTests
 
         manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
         Assert.That(grab.smoothPosition, Is.True);
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f).Within(0.001f), "6 kg in one hand: 30 / 6");
         manager.SelectEnter((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
         Assert.That(grab.interactorsSelecting.Count, Is.EqualTo(2));
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(12f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(10f).Within(0.001f), "3 kg per hand: 30 / 3");
         manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f).Within(0.001f));
         manager.SelectExit((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
         Assert.That(grab.smoothPosition, Is.EqualTo(originalSmooth));
         Assert.That(grab.smoothPositionAmount, Is.EqualTo(originalAmount));
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator HeftLeavesLightPartsCrispAndClampsMediumOnes()
+    {
+        XRInteractionManager manager = GetInteractionManager();
+        TestGrabInteractor first = CreateObject("first").AddComponent<TestGrabInteractor>();
+        TestGrabInteractor second = CreateObject("second").AddComponent<TestGrabInteractor>();
+        Type heftType = Type.GetType("GrabHeft, Assembly-CSharp", true);
+
+        GameObject ram = CreateObject("RAM");
+        ram.AddComponent<BoxCollider>();
+        XRGrabInteractable ramGrab = ram.AddComponent<XRGrabInteractable>();
+        ram.GetComponent<Rigidbody>().mass = 0.5f;
+        bool originalSmooth = ramGrab.smoothPosition;
+        ram.AddComponent(heftType);
+        manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)ramGrab);
+        Assert.That(ramGrab.smoothPosition, Is.EqualTo(originalSmooth), "0.5 kg is below the heft threshold");
+        manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)ramGrab);
+
+        GameObject psu = CreateObject("PSU");
+        psu.AddComponent<BoxCollider>();
+        XRGrabInteractable psuGrab = psu.AddComponent<XRGrabInteractable>();
+        psuGrab.selectMode = InteractableSelectMode.Multiple;
+        psu.GetComponent<Rigidbody>().mass = 2f;
+        psu.AddComponent(heftType);
+        manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)psuGrab);
+        Assert.That(psuGrab.smoothPositionAmount, Is.EqualTo(15f).Within(0.001f), "2 kg in one hand: 30 / 2");
+        manager.SelectEnter((IXRSelectInteractor)second, (IXRSelectInteractable)psuGrab);
+        Assert.That(psuGrab.smoothPositionAmount, Is.EqualTo(20f).Within(0.001f), "1 kg per hand clamps to the maximum");
+        manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)psuGrab);
+        manager.SelectExit((IXRSelectInteractor)second, (IXRSelectInteractable)psuGrab);
         yield return null;
     }
 

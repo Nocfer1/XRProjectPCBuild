@@ -2,23 +2,41 @@ using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
-[RequireComponent(typeof(XRGrabInteractable))]
+// Makes heavy objects lag behind the hand, using the Rigidbody's mass as the only per-object value.
+// Velocity tracking ignores mass while held, so the weight is expressed through grab smoothing:
+// follow response = strength / (mass / hands holding), so a second hand halves the felt weight.
+[RequireComponent(typeof(XRGrabInteractable), typeof(Rigidbody))]
 public class GrabHeft : MonoBehaviour
 {
-    [Tooltip("Follow response while held with one controller. Lower values create more lag.")]
-    [Min(0.1f)] public float oneHandFollow = 5f;
-    [Tooltip("Follow response when held with two or more controllers.")]
-    [Min(0.1f)] public float twoHandFollow = 12f;
+    [Tooltip("Follow response for 1 kg in one hand. Higher values feel lighter. 30 gives a 6 kg case a response of 5.")]
+    [Min(0.1f)] public float strength = 30f;
+    [Tooltip("Below this mass per hand (kg) the object follows the hand without added lag.")]
+    [Min(0f)] public float lightMassPerHand = 1f;
+    [Tooltip("Slowest follow response, reached by very heavy objects.")]
+    [Min(0.1f)] public float minFollow = 4f;
+    [Tooltip("Fastest follow response while heft still applies.")]
+    [Min(0.1f)] public float maxFollow = 20f;
 
     private XRGrabInteractable grab;
+    private Rigidbody body;
     private bool originalSmoothPosition;
     private bool originalSmoothRotation;
     private float originalPositionAmount;
     private float originalRotationAmount;
 
+    // Smoothing response this object would get when held by the given number of hands.
+    public float GetFollowResponse(int hands)
+    {
+        float massPerHand = body.mass / Mathf.Max(1, hands);
+        return Mathf.Clamp(strength / massPerHand, minFollow, Mathf.Max(minFollow, maxFollow));
+    }
+
+    public bool AppliesHeft(int hands) => body.mass / Mathf.Max(1, hands) >= lightMassPerHand;
+
     private void Awake()
     {
         grab = GetComponent<XRGrabInteractable>();
+        body = GetComponent<Rigidbody>();
         originalSmoothPosition = grab.smoothPosition;
         originalSmoothRotation = grab.smoothRotation;
         originalPositionAmount = grab.smoothPositionAmount;
@@ -43,8 +61,9 @@ public class GrabHeft : MonoBehaviour
 
     private void UpdateResponse()
     {
-        if (!grab.isSelected) { Restore(); return; }
-        float response = grab.interactorsSelecting.Count > 1 ? twoHandFollow : oneHandFollow;
+        int hands = grab.interactorsSelecting.Count;
+        if (hands == 0 || !AppliesHeft(hands)) { Restore(); return; }
+        float response = GetFollowResponse(hands);
         grab.smoothPosition = true;
         grab.smoothRotation = true;
         grab.smoothPositionAmount = response;
