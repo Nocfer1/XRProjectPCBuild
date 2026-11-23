@@ -125,6 +125,7 @@ public static class XRModelTestSceneBuilder
         };
 
         var root = new GameObject("PC Components");
+        root.AddComponent<NearOnlyGrabFilter>();
         for (var i = 0; i < paths.Length; i++)
         {
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(paths[i]);
@@ -219,10 +220,24 @@ public static class XRModelTestSceneBuilder
 
             var grab = item.AddComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
             grab.movementType = UnityEngine.XR.Interaction.Toolkit.Interactables.XRBaseInteractable.MovementType.VelocityTracking;
+            grab.selectMode = InteractableSelectMode.Multiple;
+            grab.useDynamicAttach = true;
+            grab.matchAttachPosition = true;
+            grab.matchAttachRotation = true;
+            grab.snapToColliderVolume = false;
+            grab.reinitializeDynamicAttachEverySingleGrab = true;
+            grab.trackScale = false;
             grab.throwOnDetach = true;
             grab.trackPosition = true;
             grab.trackRotation = true;
             grab.retainTransformParent = false;
+            string modelName = System.IO.Path.GetFileNameWithoutExtension(paths[i]);
+            if (modelName.Equals("PSU", System.StringComparison.OrdinalIgnoreCase) ||
+                modelName.IndexOf("case", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                body.mass = modelName.Equals("PSU", System.StringComparison.OrdinalIgnoreCase) ? 2f : 6f;
+                item.AddComponent<GrabHeft>();
+            }
             var serialized = new SerializedObject(grab);
             var managerProperty = serialized.FindProperty("m_InteractionManager");
             if (managerProperty != null)
