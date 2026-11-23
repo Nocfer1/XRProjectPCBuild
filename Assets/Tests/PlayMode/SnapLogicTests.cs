@@ -25,10 +25,43 @@ public class SnapLogicTests
         return obj;
     }
 
+    // Interactors register with the first active manager, and an earlier test can leave XRI's
+    // auto-created default one behind; selecting through a second manager is then ignored.
+    private XRInteractionManager GetInteractionManager()
+    {
+        var existing = UnityEngine.Object.FindAnyObjectByType<XRInteractionManager>();
+        return existing != null ? existing : CreateObject("manager").AddComponent<XRInteractionManager>();
+    }
+
     private static object Call(Component obj, string name, params object[] args) =>
         obj.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.Public).Invoke(obj, args);
     private static object Get(Component obj, string name) => obj.GetType().GetProperty(name).GetValue(obj);
     private static void Set(Component obj, string name, object value) => obj.GetType().GetField(name).SetValue(obj, value);
+
+    // Mirrors XRI: selection is allowed only if every registered select filter passes.
+    private static bool PassesSelectFilters(XRGrabInteractable grab, IXRSelectInteractor interactor)
+    {
+        var filters = new List<IXRSelectFilter>();
+        grab.selectFilters.GetAll(filters);
+        foreach (IXRSelectFilter filter in filters)
+            if (filter.canProcess && !filter.Process(interactor, grab)) return false;
+        return true;
+    }
+
+    private static void CountViolations(out Func<int> count, out Delegate handler)
+    {
+        int seen = 0;
+        Action<object> capture = value => seen++;
+        EventInfo rejected = Type.GetType("SnapPoint, Assembly-CSharp", true)
+            .GetEvent("OrderRejected", BindingFlags.Public | BindingFlags.Static);
+        handler = Delegate.CreateDelegate(rejected.EventHandlerType, capture.Target, capture.Method);
+        rejected.AddEventHandler(null, handler);
+        count = () => seen;
+    }
+
+    private static void StopCountingViolations(Delegate handler) =>
+        Type.GetType("SnapPoint, Assembly-CSharp", true)
+            .GetEvent("OrderRejected", BindingFlags.Public | BindingFlags.Static).RemoveEventHandler(null, handler);
 
     private Component CreateSlot(string name, Vector3 position, Quaternion rotation)
     {
@@ -155,7 +188,7 @@ public class SnapLogicTests
         Component part = cpu.AddComponent(PartType);
         XRGrabInteractable grab = cpu.GetComponent<XRGrabInteractable>();
         Type filterType = Type.GetType("NearOnlyGrabFilter, Assembly-CSharp", true);
-        IXRSelectFilter filter = (IXRSelectFilter)root.AddComponent(filterType);
+        root.AddComponent(filterType);
         Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
         Set(slot, "limitGrabDistance", true);
         Set(slot, "mountedGrabDistance", 0.015f);
@@ -171,14 +204,14 @@ public class SnapLogicTests
         Physics.SyncTransforms();
 
         hand.transform.position = new Vector3(0f, 0.02f, 0f);
-        Assert.That(filter.Process(nearFar, grab), Is.True, "Close approach from the front");
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.True, "Close approach from the front");
         hand.transform.position = new Vector3(0f, -0.02f, 0f);
-        Assert.That(filter.Process(nearFar, grab), Is.False, "Behind the socket");
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.False, "Behind the socket");
         hand.transform.position = new Vector3(0.04f, 0.005f, 0f);
-        Assert.That(filter.Process(nearFar, grab), Is.False, "Too far to the side while seated");
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.False, "Too far to the side while seated");
         Call(part, "Unmount");
         Physics.SyncTransforms();
-        Assert.That(filter.Process(nearFar, grab), Is.True, "Normal near range after removal");
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.True, "Normal near range after removal");
         yield return null;
     }
 
@@ -192,7 +225,7 @@ public class SnapLogicTests
         Component part = cpu.AddComponent(PartType);
         XRGrabInteractable grab = cpu.GetComponent<XRGrabInteractable>();
         Type filterType = Type.GetType("NearOnlyGrabFilter, Assembly-CSharp", true);
-        IXRSelectFilter nearFilter = (IXRSelectFilter)root.AddComponent(filterType);
+        root.AddComponent(filterType);
         Component cpuSlot = CreateSlot("cpu socket", Vector3.zero, Quaternion.identity);
         Component otherSlot = CreateSlot("other socket", new Vector3(1f, 0f, 0f), Quaternion.identity);
         Set(cpuSlot, "limitGrabDistance", true);
@@ -206,13 +239,13 @@ public class SnapLogicTests
         sphere.castOrigin = hand.transform;
         hand.transform.position = new Vector3(0f, -0.02f, 0f);
         Physics.SyncTransforms();
-        Assert.That(nearFilter.Process(nearFar, grab), Is.False, "CPU rejects behind");
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.False, "CPU rejects behind");
         Assert.That((bool)Call(otherSlot, "CanRemoveFrom", hand.transform.position, grab), Is.True,
             "Other socket defaults to proximity-only");
 
         hand.transform.position = new Vector3(0f, 0.02f, 0f);
         Set(cpuSlot, "allowRemoval", false);
-        Assert.That(nearFilter.Process(nearFar, grab), Is.False);
+        Assert.That(PassesSelectFilters(grab, nearFar), Is.False);
         Assert.That(((IXRSelectFilter)part).Process(nearFar, grab), Is.False,
             "Non-removable policy also blocks selection without the group filter");
 
@@ -239,7 +272,7 @@ public class SnapLogicTests
     [UnityTest]
     public IEnumerator PullRequiresAnotherHandAndTracksTheMovingHost()
     {
-        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        XRInteractionManager manager = GetInteractionManager();
         TestGrabInteractor boardHand = CreateObject("board hand").AddComponent<TestGrabInteractor>();
         TestGrabInteractor cpuHand = CreateObject("cpu hand").AddComponent<TestGrabInteractor>();
         GameObject board = CreateObject("board");
@@ -257,6 +290,8 @@ public class SnapLogicTests
         Component part = cpu.AddComponent(PartType);
         XRGrabInteractable cpuGrab = cpu.GetComponent<XRGrabInteractable>();
         cpuGrab.useDynamicAttach = true;
+        // Matches the scene's parts; only velocity tracking keeps a held body non-kinematic.
+        cpuGrab.movementType = XRBaseInteractable.MovementType.VelocityTracking;
         Assert.That((bool)Call(slot, "TrySeat", part), Is.True);
         manager.SelectEnter((IXRSelectInteractor)cpuHand, (IXRSelectInteractable)cpuGrab);
         Assert.That(cpuGrab.isSelected, Is.True);
@@ -286,7 +321,7 @@ public class SnapLogicTests
     [UnityTest]
     public IEnumerator ReleasingAndRegrabbingWithoutPullLeavesPartSeated()
     {
-        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        XRInteractionManager manager = GetInteractionManager();
         TestGrabInteractor hand = CreateObject("hand").AddComponent<TestGrabInteractor>();
         Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
         Set(slot, "requirePullToRemove", true);
@@ -315,15 +350,16 @@ public class SnapLogicTests
     }
 
     [UnityTest]
-    public IEnumerator HeftUsesLighterFollowForTwoHandsAndRestoresSettings()
+    public IEnumerator HeftFollowsMassSharesWeightBetweenHandsAndRestoresSettings()
     {
-        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        XRInteractionManager manager = GetInteractionManager();
         TestGrabInteractor first = CreateObject("first").AddComponent<TestGrabInteractor>();
         TestGrabInteractor second = CreateObject("second").AddComponent<TestGrabInteractor>();
-        GameObject obj = CreateObject("heavy object");
+        GameObject obj = CreateObject("case");
         obj.AddComponent<BoxCollider>();
         XRGrabInteractable grab = obj.AddComponent<XRGrabInteractable>();
         grab.selectMode = InteractableSelectMode.Multiple;
+        obj.GetComponent<Rigidbody>().mass = 6f;
         bool originalSmooth = grab.smoothPosition;
         float originalAmount = grab.smoothPositionAmount;
         Type heftType = Type.GetType("GrabHeft, Assembly-CSharp", true);
@@ -331,15 +367,48 @@ public class SnapLogicTests
 
         manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
         Assert.That(grab.smoothPosition, Is.True);
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f).Within(0.001f), "6 kg in one hand: 30 / 6");
         manager.SelectEnter((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
         Assert.That(grab.interactorsSelecting.Count, Is.EqualTo(2));
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(12f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(10f).Within(0.001f), "3 kg per hand: 30 / 3");
         manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)grab);
-        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f));
+        Assert.That(grab.smoothPositionAmount, Is.EqualTo(5f).Within(0.001f));
         manager.SelectExit((IXRSelectInteractor)second, (IXRSelectInteractable)grab);
         Assert.That(grab.smoothPosition, Is.EqualTo(originalSmooth));
         Assert.That(grab.smoothPositionAmount, Is.EqualTo(originalAmount));
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator HeftLeavesLightPartsCrispAndClampsMediumOnes()
+    {
+        XRInteractionManager manager = GetInteractionManager();
+        TestGrabInteractor first = CreateObject("first").AddComponent<TestGrabInteractor>();
+        TestGrabInteractor second = CreateObject("second").AddComponent<TestGrabInteractor>();
+        Type heftType = Type.GetType("GrabHeft, Assembly-CSharp", true);
+
+        GameObject ram = CreateObject("RAM");
+        ram.AddComponent<BoxCollider>();
+        XRGrabInteractable ramGrab = ram.AddComponent<XRGrabInteractable>();
+        ram.GetComponent<Rigidbody>().mass = 0.5f;
+        bool originalSmooth = ramGrab.smoothPosition;
+        ram.AddComponent(heftType);
+        manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)ramGrab);
+        Assert.That(ramGrab.smoothPosition, Is.EqualTo(originalSmooth), "0.5 kg is below the heft threshold");
+        manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)ramGrab);
+
+        GameObject psu = CreateObject("PSU");
+        psu.AddComponent<BoxCollider>();
+        XRGrabInteractable psuGrab = psu.AddComponent<XRGrabInteractable>();
+        psuGrab.selectMode = InteractableSelectMode.Multiple;
+        psu.GetComponent<Rigidbody>().mass = 2f;
+        psu.AddComponent(heftType);
+        manager.SelectEnter((IXRSelectInteractor)first, (IXRSelectInteractable)psuGrab);
+        Assert.That(psuGrab.smoothPositionAmount, Is.EqualTo(15f).Within(0.001f), "2 kg in one hand: 30 / 2");
+        manager.SelectEnter((IXRSelectInteractor)second, (IXRSelectInteractable)psuGrab);
+        Assert.That(psuGrab.smoothPositionAmount, Is.EqualTo(20f).Within(0.001f), "1 kg per hand clamps to the maximum");
+        manager.SelectExit((IXRSelectInteractor)first, (IXRSelectInteractable)psuGrab);
+        manager.SelectExit((IXRSelectInteractor)second, (IXRSelectInteractable)psuGrab);
         yield return null;
     }
 
@@ -394,7 +463,7 @@ public class SnapLogicTests
     [UnityTest]
     public IEnumerator BlockedGrabKeepsPartMountedAndDoesNotSpamEvents()
     {
-        XRInteractionManager manager = CreateObject("manager").AddComponent<XRInteractionManager>();
+        XRInteractionManager manager = GetInteractionManager();
         TestGrabInteractor hand = CreateObject("hand").AddComponent<TestGrabInteractor>();
         Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
         Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
@@ -456,6 +525,116 @@ public class SnapLogicTests
         Call(gpu, "Unmount");
         Call(motherboard, "Unmount");
         Assert.That((bool)Get(motherboard, "IsMounted"), Is.False);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator DisablingPrerequisiteSlotAlsoVacatesItsDependents()
+    {
+        Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
+        Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
+        ((IList)fanSlot.GetType().GetField("requiredOccupiedSlots").GetValue(fanSlot)).Add(cpuSlot);
+        Component cpu = CreateObject("CPU").AddComponent(PartType);
+        Component fan = CreateObject("fan").AddComponent(PartType);
+        Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+        Assert.That((bool)Call(fanSlot, "TrySeat", fan), Is.True);
+
+        ((Behaviour)cpuSlot).enabled = false;
+        Assert.That((bool)Get(cpu, "IsMounted"), Is.False);
+        Assert.That((bool)Get(fan, "IsMounted"), Is.False, "Dependent must not stay seated without its prerequisite");
+        Assert.That((bool)Get(fanSlot, "isOccupied"), Is.False);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator DisablingMountedPartAlsoVacatesItsDependents()
+    {
+        Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
+        Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
+        ((IList)fanSlot.GetType().GetField("requiredOccupiedSlots").GetValue(fanSlot)).Add(cpuSlot);
+        Component cpu = CreateObject("CPU").AddComponent(PartType);
+        Component fan = CreateObject("fan").AddComponent(PartType);
+        Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+        Assert.That((bool)Call(fanSlot, "TrySeat", fan), Is.True);
+
+        ((Behaviour)cpu).enabled = false;
+        Assert.That((bool)Get(cpuSlot, "isOccupied"), Is.False);
+        Assert.That((bool)Get(fan, "IsMounted"), Is.False);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator EmptyOrSelfPrerequisiteEntriesAreIgnored()
+    {
+        Component slot = CreateSlot("socket", Vector3.zero, Quaternion.identity);
+        var required = (IList)slot.GetType().GetField("requiredOccupiedSlots").GetValue(slot);
+        required.Add(null);
+        required.Add(slot);
+        Component part = CreateObject("part").AddComponent(PartType);
+        Assert.That((bool)Call(slot, "TrySeat", part), Is.True);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator BadlyRotatedPartIsNotReportedAsAnOrderViolation()
+    {
+        Component cpuSlot = CreateSlot("CPU socket", new Vector3(1f, 0f, 0f), Quaternion.identity);
+        Component fanSlot = CreateSlot("fan socket", Vector3.zero, Quaternion.identity);
+        ((IList)fanSlot.GetType().GetField("requiredOccupiedSlots").GetValue(fanSlot)).Add(cpuSlot);
+        GameObject fanObject = CreateObject("fan");
+        fanObject.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+        Component fan = fanObject.AddComponent(PartType);
+        Physics.SyncTransforms();
+
+        CountViolations(out Func<int> count, out Delegate handler);
+        try
+        {
+            Assert.That((bool)Call(fan, "TryMountToNearbySlot"), Is.False);
+            Assert.That(count(), Is.EqualTo(0));
+            fanObject.transform.rotation = Quaternion.identity;
+            Assert.That((bool)Call(fan, "TryMountToNearbySlot"), Is.False);
+            Assert.That(count(), Is.EqualTo(1), "A correctly aligned part is reported as blocked by order");
+        }
+        finally
+        {
+            StopCountingViolations(handler);
+        }
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator PartSeatedIntoMountedAssemblyIgnoresTheOuterHost()
+    {
+        GameObject pcCase = CreateObject("case");
+        pcCase.AddComponent<Rigidbody>().isKinematic = true;
+        Collider caseCollider = pcCase.AddComponent<BoxCollider>();
+        Component caseSlot = CreateSlot("case motherboard mount", Vector3.zero, Quaternion.identity);
+        caseSlot.transform.SetParent(pcCase.transform, true);
+        var slotType = caseSlot.GetType().GetField("acceptedSlotType").FieldType;
+        object motherboardType = Enum.Parse(slotType, "Motherboard");
+        Set(caseSlot, "acceptedSlotType", motherboardType);
+
+        GameObject board = CreateObject("motherboard");
+        Collider boardCollider = board.AddComponent<BoxCollider>();
+        Component motherboard = board.AddComponent(PartType);
+        Set(motherboard, "compatibleSlotType", motherboardType);
+        Component cpuSlot = CreateSlot("CPU socket", Vector3.zero, Quaternion.identity);
+        cpuSlot.transform.SetParent(board.transform, true);
+        Assert.That((bool)Call(caseSlot, "TrySeat", motherboard), Is.True);
+
+        GameObject cpuObject = CreateObject("CPU");
+        Collider cpuCollider = cpuObject.AddComponent<BoxCollider>();
+        Component cpu = cpuObject.AddComponent(PartType);
+        Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+        Assert.That(Physics.GetIgnoreCollision(cpuCollider, boardCollider), Is.True);
+        Assert.That(Physics.GetIgnoreCollision(cpuCollider, caseCollider), Is.True,
+            "The motherboard assembly refreshes when the CPU joins it");
+
+        Call(cpu, "Unmount");
+        Assert.That(Physics.GetIgnoreCollision(cpuCollider, boardCollider), Is.False);
+        Assert.That(Physics.GetIgnoreCollision(cpuCollider, caseCollider), Is.False,
+            "Pairs are restored when the CPU leaves the assembly");
+        Assert.That(Physics.GetIgnoreCollision(boardCollider, caseCollider), Is.True);
         yield return null;
     }
 
