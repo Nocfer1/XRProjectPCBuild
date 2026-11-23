@@ -145,13 +145,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 107769583}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: 0.65, y: 0.179, z: 0.267}
+  m_LocalRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 0.65, y: 0.179, z: 0.21}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1718365844}
-  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 90}
+  m_LocalEulerAnglesHint: {x: 0, y: -90, z: 0}
 --- !u!114 &107769585
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -201,7 +201,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.5, y: 0.1, z: 0.5}
+  m_Size: {x: 0.1, y: 0.5, z: 0.5}
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &135062127
 GameObject:
@@ -543,8 +543,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
-  oneHandFollow: 5
-  twoHandFollow: 12
+  strength: 30
+  lightMassPerHand: 1
+  minFollow: 4
+  maxFollow: 20
 --- !u!1 &240191656
 GameObject:
   m_ObjectHideFlags: 0
@@ -1811,10 +1813,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 5
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 0
-  initialSlot: {fileID: 0}
+  initialSlot: {fileID: 107769585}
 --- !u!1 &810956791
 GameObject:
   m_ObjectHideFlags: 0
@@ -2133,6 +2136,11 @@ GameObject:
   m_Component:
   - component: {fileID: 908416896}
   - component: {fileID: 908416899}
+  - component: {fileID: 908416901}
+  - component: {fileID: 908416902}
+  - component: {fileID: 908416903}
+  - component: {fileID: 908416904}
+  - component: {fileID: 908416905}
   - component: {fileID: 908416898}
   - component: {fileID: 908416897}
   - component: {fileID: 908416900}
@@ -2337,8 +2345,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.262684, y: 0.44704682, z: 0.4769713}
-  m_Center: {x: 0.0965954, y: 0.84909004, z: 0.08942612}
+  m_Size: {x: 0.262684, y: 0.014356, z: 0.452412}
+  m_Center: {x: 0.0965954, y: 0.632746, z: 0.092857}
 --- !u!114 &908416900
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2351,8 +2359,115 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfec22ac93824ab68e3e3337a984fb36, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GrabHeft
-  oneHandFollow: 0.1
-  twoHandFollow: 0.1
+  strength: 30
+  lightMassPerHand: 1
+  minFollow: 4
+  maxFollow: 20
+--- !u!65 &908416901
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.262684, y: 0.032377, z: 0.452412}
+  m_Center: {x: 0.0965954, y: 1.056425, z: 0.092857}
+--- !u!65 &908416902
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.262684, y: 0.447045, z: 0.052101}
+  m_Center: {x: 0.0965954, y: 0.84909, z: -0.107299}
+--- !u!65 &908416903
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.262684, y: 0.447045, z: 0.017924}
+  m_Center: {x: 0.0965954, y: 0.84909, z: 0.310101}
+--- !u!65 &908416904
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.085255, y: 0.447045, z: 0.452412}
+  m_Center: {x: 0.18531, y: 0.84909, z: 0.092857}
+--- !u!65 &908416905
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908416895}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.015512, y: 0.447045, z: 0.145307}
+  m_Center: {x: -0.026991, y: 0.84909, z: -0.022337}
 --- !u!1 &924028034
 GameObject:
   m_ObjectHideFlags: 0
@@ -3232,10 +3347,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 0
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
-  initialSlot: {fileID: 0}
+  initialSlot: {fileID: 2094032189}
 --- !u!1001 &1389538018
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -4025,7 +4141,7 @@ Transform:
   m_GameObject: {fileID: 1739335222}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: 0.7071068, z: 0.7071068, w: 0}
-  m_LocalPosition: {x: 0, y: 0.93, z: 0.427}
+  m_LocalPosition: {x: 0, y: 0.848, z: 1.003}
   m_LocalScale: {x: 0.1, y: 0.10000001, z: 0.10000001}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -4905,6 +5021,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 1
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3000000003}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
@@ -4967,7 +5084,7 @@ Transform:
   m_GameObject: {fileID: 3000000010}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: 0.0765, y: 0.1985, z: 0.13}
+  m_LocalPosition: {x: 0.0765, y: 0.198, z: 0.15}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5051,7 +5168,7 @@ Transform:
   m_GameObject: {fileID: 3000000020}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: -0.027, y: 0.1985, z: 0.13}
+  m_LocalPosition: {x: -0.027, y: 0.19799931, z: 0.14999974}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5135,7 +5252,7 @@ Transform:
   m_GameObject: {fileID: 3000000030}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: -0.1295, y: 0.1985, z: 0.13}
+  m_LocalPosition: {x: -0.1295, y: 0.19799931, z: 0.14999974}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5219,7 +5336,7 @@ Transform:
   m_GameObject: {fileID: 3000000040}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: -0.2335, y: 0.1985, z: 0.13}
+  m_LocalPosition: {x: -0.2335, y: 0.19799931, z: 0.14999974}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5578,6 +5695,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 1
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3100000010}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
@@ -5626,10 +5744,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 2
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3200000003}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 1
-  initialSlot: {fileID: 3200000022}
+  initialSlot: {fileID: 0}
 --- !u!1 &3200000002
 GameObject:
   m_ObjectHideFlags: 0
@@ -6013,6 +6132,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 4
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3500000003}
   snapSearchRadius: 0.15
   logSnapDiagnostics: 1
@@ -6061,10 +6181,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 6
+  info: {fileID: 0}
   alignmentPivot: {fileID: 3500000013}
   snapSearchRadius: 0.15
   logSnapDiagnostics: 1
-  initialSlot: {fileID: 0}
+  initialSlot: {fileID: 3500000102}
 --- !u!1 &3500000012
 GameObject:
   m_ObjectHideFlags: 0
@@ -6105,8 +6226,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 3500000101}
-  - component: {fileID: 3500000102}
   - component: {fileID: 3500000103}
+  - component: {fileID: 3500000102}
   m_Layer: 0
   m_Name: Case_Motherboard_SnapPoint
   m_TagString: Untagged
@@ -6123,7 +6244,7 @@ Transform:
   m_GameObject: {fileID: 3500000100}
   serializedVersion: 2
   m_LocalRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: 0.139, y: 0.804, z: 0.185}
+  m_LocalPosition: {x: 0.1472, y: 0.7998, z: 0.185}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -6178,7 +6299,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.3, y: 0.01, z: 0.26}
+  m_Size: {x: 0.3, y: 0.26, z: 0.01}
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &3500000110
 GameObject:
@@ -6372,6 +6493,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MountablePart
   compatibleSlotType: 7
+  info: {fileID: 0}
   alignmentPivot: {fileID: 0}
   snapSearchRadius: 0.1
   logSnapDiagnostics: 0
