@@ -20,6 +20,10 @@ public class SnapPoint : MonoBehaviour
     public AssemblyOrderViolationEvent onOrderRejected = new AssemblyOrderViolationEvent();
 
     public static event Action<AssemblyOrderViolation> OrderRejected;
+    // Fired after any part is seated in any slot, including parts placed by code (initialSlot).
+    public static event Action<SnapPoint, MountablePart> PartSeated;
+    // Fired after a seated part leaves its slot, whatever the reason (grabbed off, vacated, disabled).
+    public static event Action<SnapPoint, MountablePart> PartVacated;
     private static readonly HashSet<SnapPoint> activeSlots = new HashSet<SnapPoint>();
     public static IReadOnlyCollection<SnapPoint> ActiveSlots => activeSlots;
     private bool vacating;
@@ -148,12 +152,15 @@ public class SnapPoint : MonoBehaviour
         }
         if (!part.SeatIn(this)) return false;
         SeatedPart = part;
+        PartSeated?.Invoke(this, part);
         return true;
     }
 
     internal void ClearSeat(MountablePart part)
     {
-        if (SeatedPart == part) SeatedPart = null;
+        if (SeatedPart != part) return;
+        SeatedPart = null;
+        PartVacated?.Invoke(this, part);
     }
 
     // Removes the seated part without the order check. Occupied slots that depend on this one
