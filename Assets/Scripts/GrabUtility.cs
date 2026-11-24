@@ -30,4 +30,18 @@ public static class GrabUtility
         }
         return false;
     }
+
+    public static bool IsHeld(Component component)
+    {
+        var grab = component != null ? component.GetComponent<XRGrabInteractable>() : null;
+        return grab != null && grab.isSelected;
+    }
+
+    // Takes the object out of every hand holding it.
+    public static void ForceRelease(Component component)
+    {
+        var grab = component != null ? component.GetComponent<XRGrabInteractable>() : null;
+        if (grab != null && grab.isSelected && grab.interactionManager != null)
+            grab.interactionManager.CancelInteractableSelection((IXRSelectInteractable)grab);
+    }
 }
