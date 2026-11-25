@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
-public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply, CPUCooler, Motherboard, SSD }
+// Append new values at the end: slot types are serialized by number.
+public enum SlotType { CPU, RAM, PCIe, CaseStandoff, PowerSupply, CPUCooler, Motherboard, SSD, CaseLid }
 
 public class SnapPoint : MonoBehaviour
 {
