@@ -47,6 +47,7 @@ public class BuildProgression : MonoBehaviour
 
     private readonly Dictionary<Rigidbody, Home> homes = new Dictionary<Rigidbody, Home>();
     private Coroutine restarting;
+    private bool rebuilding;
 
     private void Awake()
     {
@@ -66,7 +67,7 @@ public class BuildProgression : MonoBehaviour
         HideLockedParts(0);
     }
 
-    // A stage with no required parts, or whose parts were seated through an Initial Slot, unlocks without waiting for a mount.
+    // A stage with no required parts unlocks without waiting for a mount.
     private void Start() => Evaluate();
 
     private void OnEnable() => SnapPoint.PartSeated += OnPartSeated;
@@ -77,7 +78,7 @@ public class BuildProgression : MonoBehaviour
     // Unlocks every stage whose parts are all mounted, in order.
     public void Evaluate()
     {
-        if (restarting != null) return;
+        if (restarting != null || rebuilding) return;
         while (!IsComplete && IsSatisfied(stages[UnlockedStageCount]))
             Unlock(UnlockedStageCount);
     }
@@ -113,33 +114,31 @@ public class BuildProgression : MonoBehaviour
             if (body != null) body.gameObject.SetActive(true);
     }
 
-    // Sends the parts of the latest drop that are lying loose back through the chute. Before anything
-    // has dropped, the starting parts go back to where they began instead. Progress is not undone.
+    // Takes the build apart, then rebuilds every finished stage by mounting its required parts in
+    // their Build Slots, and drops the parts of the latest stage through the chute again.
+    // Progress is not undone. Before anything has dropped this is the same as a full restart.
     [ContextMenu("Reset Current Stage")]
-    public void ResetCurrentStage()
-    {
-        if (restarting != null) return;
-        if (UnlockedStageCount == 0)
-        {
-            foreach (Rigidbody body in startingParts)
-                if (body != null && !GrabUtility.IsHeld(body)) ReturnHome(body);
-            return;
-        }
-        var loose = new List<Rigidbody>();
-        foreach (Rigidbody body in stages[UnlockedStageCount - 1].partsToDrop)
-        {
-            if (body == null || GrabUtility.IsHeld(body) || (chute != null && chute.IsPending(body))) continue;
-            var part = body.GetComponent<MountablePart>();
-            if (part == null || !part.IsMounted) loose.Add(body);
-        }
-        if (loose.Count > 0) DropParts(loose);
-    }
+    public void ResetCurrentStage() => RestartAt(UnlockedStageCount);
 
     // Takes the whole build apart and returns to the first stage.
     [ContextMenu("Full Restart")]
-    public void FullRestart()
+    public void FullRestart() => RestartAt(0);
+
+    [Tooltip("Development only: the stage the Skip To Debug Stage context menu rebuilds the PC up to.")]
+    [Min(0)] public int debugSkipToStage;
+
+    [ContextMenu("Skip To Debug Stage")]
+    private void SkipToDebugStage()
+    {
+        if (!Application.isPlaying) return;
+        RestartAt(Mathf.Clamp(debugSkipToStage, 0, stages.Count));
+    }
+
+    // Resets everything, then rebuilds the progress of the first unlockedStages stages.
+    public void RestartAt(int unlockedStages)
     {
         if (restarting != null) return;
+        unlockedStages = Mathf.Clamp(unlockedStages, 0, stages.Count);
         bool anyHeld = false;
         foreach (Rigidbody body in homes.Keys)
         {
@@ -149,19 +148,19 @@ public class BuildProgression : MonoBehaviour
         }
         if (chute != null) chute.CancelAll();
         // XR Grab finishes letting go during the frame; reset after that so it can't undo the reset.
-        if (anyHeld && isActiveAndEnabled) restarting = StartCoroutine(RestartAfterRelease());
-        else ResetAll();
+        if (anyHeld && isActiveAndEnabled) restarting = StartCoroutine(RestartAfterRelease(unlockedStages));
+        else ResetAll(unlockedStages);
     }
 
-    private IEnumerator RestartAfterRelease()
+    private IEnumerator RestartAfterRelease(int unlockedStages)
     {
         yield return null;
         yield return new WaitForEndOfFrame();
         restarting = null;
-        ResetAll();
+        ResetAll(unlockedStages);
     }
 
-    private void ResetAll()
+    private void ResetAll(int unlockedStages)
     {
         // Unmount everything first so no part is carried along by another.
         foreach (Rigidbody body in homes.Keys)
@@ -173,6 +172,44 @@ public class BuildProgression : MonoBehaviour
             if (body != null) ReturnHome(body);
         UnlockedStageCount = 0;
         HideLockedParts(0);
+        if (unlockedStages > 0) Rebuild(unlockedStages);
+    }
+
+    // Puts the build back the way it is expected to be once unlockedStages stages are unlocked.
+    // Seating fires PartSeated; rebuilding stops Evaluate from unlocking (and dropping) anything meanwhile.
+    private void Rebuild(int unlockedStages)
+    {
+        rebuilding = true;
+        try
+        {
+            // Parts revealed by earlier stages are already in the player's hands; they appear at their home spots.
+            for (int i = 0; i < unlockedStages - 1; i++)
+                foreach (Rigidbody body in stages[i].partsToDrop)
+                    if (body != null) body.gameObject.SetActive(true);
+
+            // Stage order is build order, so each part's prerequisites are mounted before it.
+            for (int i = 0; i < unlockedStages; i++)
+                foreach (MountablePart part in stages[i].requiredMounted)
+                {
+                    if (part == null) continue;
+                    part.gameObject.SetActive(true);
+                    part.TrySeatInBuildSlot();
+                }
+            UnlockedStageCount = unlockedStages;
+        }
+        finally { rebuilding = false; }
+
+        // The latest stage's parts come down the chute again, as when that stage first unlocked.
+        var latest = new List<Rigidbody>();
+        foreach (Rigidbody body in stages[unlockedStages - 1].partsToDrop)
+        {
+            if (body == null) continue;
+            var part = body.GetComponent<MountablePart>();
+            if (part == null || !part.IsMounted) latest.Add(body);
+        }
+        if (latest.Count > 0) DropParts(latest);
+        // A following stage with nothing left to mount unlocks straight away, as it does in normal play.
+        Evaluate();
     }
 
     private void ReturnHome(Rigidbody body)

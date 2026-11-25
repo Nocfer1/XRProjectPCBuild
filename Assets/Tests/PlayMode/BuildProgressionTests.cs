@@ -260,24 +260,70 @@ public class BuildProgressionTests
     }
 
     [UnityTest]
-    public IEnumerator ResetCurrentStageDropsLooseLatestPartsAgain()
+    public IEnumerator ResetCurrentStageRemountsProgressAndDropsLatestPartsAgain()
     {
-        Component cpu = CreatePart("cpu", Vector3.zero, CpuSlot);
+        Vector3 home = new Vector3(0.5f, 0f, 0f);
+        Component cpu = CreatePart("cpu", home, CpuSlot);
         Component slot = CreateSlot("socket", Vector3.zero, CpuSlot);
+        Set(cpu, "buildSlot", slot);
         Rigidbody ram = CreateLoot("ram", new Vector3(2f, 0f, 0f));
         Component chute = CreateChute(new Vector3(0f, 5f, 0f));
         Func<int> releases = CountReleases(chute);
         Component progression = CreateProgression(chute, new[] { cpu.GetComponent<Rigidbody>() },
             (new[] { cpu }, new[] { ram }));
 
+        cpu.transform.position = Vector3.zero;
         Assert.That((bool)Call(slot, "TrySeat", cpu), Is.True);
         yield return Frames(5);
+        // The player takes the CPU back out and leaves the RAM lying somewhere.
+        Call(cpu, "Unmount");
+        cpu.transform.position = new Vector3(3f, 0f, 3f);
         ram.position = new Vector3(4f, 0f, 4f);
+
         Call(progression, "ResetCurrentStage");
+        Assert.That((bool)Get(cpu, "IsMounted"), Is.True, "Finished stages are rebuilt in their build slots.");
+        Assert.That(Get(cpu, "MountedSlot"), Is.SameAs(slot));
         Assert.That((bool)Call(chute, "IsPending", ram), Is.True);
         yield return Frames(5);
         Assert.That(releases(), Is.EqualTo(2));
         Assert.That((int)Get(progression, "UnlockedStageCount"), Is.EqualTo(1), "Resetting never undoes progress.");
+    }
+
+    [UnityTest]
+    public IEnumerator ResetCurrentStageRebuildsEveryFinishedStageInOrder()
+    {
+        Component cpu = CreatePart("cpu", new Vector3(0.5f, 0f, 0f), CpuSlot);
+        Component cpuSlot = CreateSlot("cpu socket", Vector3.zero, CpuSlot);
+        Component ram = CreatePart("ram", new Vector3(1.5f, 0f, 0f), RamSlot);
+        Component ramSlot = CreateSlot("ram slot", new Vector3(1f, 0f, 0f), RamSlot);
+        List(ramSlot, "requiredOccupiedSlots").Add(cpuSlot);
+        Set(cpu, "buildSlot", cpuSlot);
+        Set(ram, "buildSlot", ramSlot);
+        Rigidbody ssd = CreateLoot("ssd", new Vector3(3f, 0f, 0f));
+        Component chute = CreateChute(new Vector3(0f, 5f, 0f));
+        Component progression = CreateProgression(chute, new[] { cpu.GetComponent<Rigidbody>() },
+            (new[] { cpu }, new[] { ram.GetComponent<Rigidbody>() }),
+            (new[] { ram }, new[] { ssd }));
+
+        cpu.transform.position = Vector3.zero;
+        Assert.That((bool)Call(cpuSlot, "TrySeat", cpu), Is.True);
+        yield return Frames(5);
+        // The chute tumbles parts as they fall; line the RAM up with its slot by hand.
+        ram.transform.SetPositionAndRotation(new Vector3(1f, 0f, 0f), Quaternion.identity);
+        Assert.That((bool)Call(ramSlot, "TrySeat", ram), Is.True);
+        Assert.That((int)Get(progression, "UnlockedStageCount"), Is.EqualTo(2));
+        yield return Frames(5);
+
+        // Tear the build apart; the RAM has to come out before the CPU it depends on.
+        Call(ram, "Unmount");
+        Call(cpu, "Unmount");
+        Call(progression, "ResetCurrentStage");
+        Assert.That(Get(cpu, "MountedSlot"), Is.SameAs(cpuSlot));
+        Assert.That(Get(ram, "MountedSlot"), Is.SameAs(ramSlot));
+        Assert.That((bool)Call(chute, "IsPending", ssd), Is.True, "Only the latest stage's parts are dropped again.");
+        Assert.That((bool)Call(chute, "IsPending", ram.GetComponent<Rigidbody>()), Is.False);
+        Assert.That((int)Get(progression, "UnlockedStageCount"), Is.EqualTo(2));
+        yield return null;
     }
 
     [UnityTest]

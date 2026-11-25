@@ -20,7 +20,7 @@ public class SnapPoint : MonoBehaviour
     public AssemblyOrderViolationEvent onOrderRejected = new AssemblyOrderViolationEvent();
 
     public static event Action<AssemblyOrderViolation> OrderRejected;
-    // Fired after any part is seated in any slot, including parts placed by code (initialSlot).
+    // Fired after any part is seated in any slot, including parts placed by code (build slots on reset).
     public static event Action<SnapPoint, MountablePart> PartSeated;
     // Fired after a seated part leaves its slot, whatever the reason (grabbed off, vacated, disabled).
     public static event Action<SnapPoint, MountablePart> PartVacated;
@@ -141,7 +141,7 @@ public class SnapPoint : MonoBehaviour
 
     public bool TrySeat(MountablePart part) => TrySeat(part, true);
 
-    // requirePrecisionFit is false for parts placed by code (initial slots); seating aligns them anyway.
+    // requirePrecisionFit is false for parts placed by code (build slots); seating aligns them anyway.
     internal bool TrySeat(MountablePart part, bool requirePrecisionFit)
     {
         if (!CanConsider(part) || (requirePrecisionFit && !EvaluatePrecisionFit(part.AlignmentPivot))) return false;

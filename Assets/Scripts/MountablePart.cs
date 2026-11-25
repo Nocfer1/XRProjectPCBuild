@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Filtering;
 using UnityEngine.XR.Interaction.Toolkit.Feedback;
@@ -24,8 +25,9 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
     public bool logSnapDiagnostics;
 
     // XRModelTestScene RAM slots: motherboard-local Z = 0.13 is the visually verified seated depth.
-    [Tooltip("Optional slot occupied when Play starts. The part is aligned and mounted using the normal snap logic.")]
-    public SnapPoint initialSlot;
+    [Tooltip("Where this part sits in the finished build. Reset Stage mounts it here when rebuilding the progress made so far.")]
+    [FormerlySerializedAs("initialSlot")]
+    public SnapPoint buildSlot;
 
     public SnapPoint MountedSlot { get; private set; }
     public bool IsMounted => MountedSlot != null;
@@ -122,13 +124,29 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
         grabInteractable.hoverFilters.Add(this);
     }
 
-    private void Start()
+    // Mounts the part in its build slot without the precision check, the way Reset Stage rebuilds progress.
+    internal bool TrySeatInBuildSlot()
     {
-        if (initialSlot == null) return;
-        if (!initialSlot.CanAccept(this))
-            Debug.LogWarning($"{name}: Initial slot {initialSlot.name} is unavailable or incompatible.", this);
-        else if (!initialSlot.TrySeat(this, false))
-            Debug.LogWarning($"{name}: Could not mount in initial slot {initialSlot.name}.", this);
+        if (buildSlot == null)
+        {
+            Debug.LogWarning($"{name}: No Build Slot is set, so it cannot be put back into the build.", this);
+            return false;
+        }
+        if (IsMounted && MountedSlot == buildSlot) return true;
+        if (!buildSlot.CanAccept(this))
+        {
+            Debug.LogWarning($"{name}: Build slot {buildSlot.name} is unavailable, incompatible or still missing a prerequisite.", this);
+            return false;
+        }
+        if (buildSlot.TrySeat(this, false)) return true;
+        Debug.LogWarning($"{name}: Could not mount in build slot {buildSlot.name}.", this);
+        return false;
+    }
+
+    private void OnValidate()
+    {
+        if (buildSlot != null && buildSlot.acceptedSlotType != compatibleSlotType)
+            Debug.LogWarning($"{name}: Build Slot {buildSlot.name} accepts {buildSlot.acceptedSlotType}, but this part is {compatibleSlotType}.", this);
     }
 
     private void OnDisable()
