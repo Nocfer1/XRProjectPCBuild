@@ -1949,7 +1949,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RemoteButton
   remote: {fileID: 9001904960784115730}
-  holdSeconds: 0
+  holdSeconds: 0.5
   onPressed:
     m_PersistentCalls:
       m_Calls:

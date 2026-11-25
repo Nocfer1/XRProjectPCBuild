@@ -12,7 +12,7 @@ public class RemoteControl : MonoBehaviour
     [Tooltip("Found in the scene when left empty.")]
     public BuildProgression progression;
 
-    [Tooltip("Called by Back To Menu. There is no main menu yet, so nothing listens by default.")]
+    [Tooltip("Called by Back To Menu just before the main menu scene loads.")]
     public UnityEvent onBackToMenu = new UnityEvent();
 
     public XRGrabInteractable Grab { get; private set; }
@@ -53,10 +53,10 @@ public class RemoteControl : MonoBehaviour
         else Debug.LogWarning($"{name}: No Build Progression to reset.", this);
     }
 
-    // Placeholder until the game has a main menu.
+    // Leaves the build for the main menu. The build is not kept: starting again begins from the first stage.
     public void BackToMenu()
     {
-        Debug.Log($"{name}: Back To Menu pressed. There is no main menu yet.", this);
         onBackToMenu.Invoke();
+        SceneFlow.LoadMenu();
     }
 }
