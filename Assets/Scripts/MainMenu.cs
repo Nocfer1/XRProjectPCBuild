@@ -7,7 +7,9 @@ using UnityEngine.InputSystem.Utilities;
 
 // The title screen: any button on any device (controller, keyboard, mouse, gamepad) starts the build.
 // Presses are ignored for a moment after the menu opens, so a button still being let go of after
-// pressing Back To Menu does not skip straight past it.
+// pressing Back To Menu does not skip straight past it. That moment is counted from the first smooth
+// frame, and XR tracking/presence flags (which the Input System reports as buttons) are ignored, so
+// a headset or controller coming online on a cold start does not count as a press.
 public class MainMenu : MonoBehaviour
 {
     [Tooltip("Seconds after the menu opens before a press starts the game.")]
@@ -30,11 +32,15 @@ public class MainMenu : MonoBehaviour
     private bool started;
     private IDisposable anyButton;
 
+    // A frame longer than this counts as a loading stall, so the arm timer does not start during it.
+    private const float MaxSmoothFrameTime = 0.1f;
+
     private void OnEnable()
     {
-        openedAt = Time.unscaledTime;
+        // Not armed until frames run smoothly, so a load or XR start-up stall cannot use up armDelay.
+        openedAt = float.PositiveInfinity;
         started = false;
-        anyButton = InputSystem.onAnyButtonPress.Call(_ => TryStart());
+        anyButton = InputSystem.onAnyButtonPress.Call(OnAnyButton);
         UpdatePrompt();
     }
 
@@ -44,7 +50,27 @@ public class MainMenu : MonoBehaviour
         anyButton = null;
     }
 
-    private void Update() => UpdatePrompt();
+    private void Update()
+    {
+        if (float.IsPositiveInfinity(openedAt) && Time.unscaledDeltaTime < MaxSmoothFrameTime)
+            openedAt = Time.unscaledTime;
+        UpdatePrompt();
+    }
+
+    private void OnAnyButton(InputControl control)
+    {
+        if (IsStateFlag(control)) return;
+        TryStart();
+    }
+
+    // XR devices expose tracking and presence state as buttons. These flip to "pressed" when a headset
+    // or controller comes online, which is not a user press.
+    private static bool IsStateFlag(InputControl control)
+    {
+        if (control.noisy || control.synthetic) return true;
+        string name = control.name;
+        return name == "isTracked" || name == "userPresence" || name.EndsWith("Touched");
+    }
 
     // Starts the game if the menu is ready. Returns false if it was pressed too early or already started.
     public bool TryStart()
