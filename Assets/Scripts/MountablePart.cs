@@ -4,7 +4,6 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Filtering;
-using UnityEngine.XR.Interaction.Toolkit.Feedback;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
@@ -28,6 +27,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
     [Tooltip("Where this part sits in the finished build. Reset Stage mounts it here when rebuilding the progress made so far.")]
     [FormerlySerializedAs("initialSlot")]
     public SnapPoint buildSlot;
+
+    [Header("Feedback")]
+    [Tooltip("Controller buzz when a held part is aligned with a slot and would snap in if let go. 0 turns it off.")]
+    [Range(0f, 1f)] public float snapReadyHaptic = 0.4f;
+
+    // Fired when a player lets go of a part and it snaps into a slot. Not fired for parts placed by code (Reset Stage).
+    public static event System.Action<MountablePart, SnapPoint> Snapped;
 
     public SnapPoint MountedSlot { get; private set; }
     public bool IsMounted => MountedSlot != null;
@@ -107,6 +113,8 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
     private float nextPullHapticTime;
     private bool pullBaselineReady;
     private SnapPoint reportedRemovalBlocker;
+    private bool? snapReady; // Null until first checked in a grab, so a part that starts out aligned does not buzz.
+    private float nextSnapReadyHapticTime;
     private readonly List<(Collider part, Collider host)> ignoredHostCollisions = new List<(Collider, Collider)>();
 
     private void Awake()
@@ -216,6 +224,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
 
     private void Update()
     {
+        UpdateSnapReady();
         if (!seatedGrip.HasValue || !IsMounted || !grabInteractable.isSelected) return;
         if (pullingInteractor == null || !pullingInteractor.IsSelecting(grabInteractable))
         {
@@ -248,13 +257,13 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
         if (distance > 0.003f && Time.time >= nextPullHapticTime)
         {
             float progress = Mathf.Clamp01(distance / Mathf.Max(0.001f, MountedSlot.pullDistance));
-            SendPullHaptic(pullingInteractor, Mathf.Lerp(0.1f, 0.25f, progress), 0.05f);
+            GrabUtility.SendHaptic(pullingInteractor, Mathf.Lerp(0.1f, 0.25f, progress), 0.05f);
             nextPullHapticTime = Time.time + 0.2f;
         }
         pullTimer = distance >= MountedSlot.pullDistance ? pullTimer + Time.deltaTime : 0f;
         if (distance >= MountedSlot.pullDistance && pullTimer >= MountedSlot.pullHoldSeconds)
         {
-            SendPullHaptic(pullingInteractor, 0.35f, 0.08f);
+            GrabUtility.SendHaptic(pullingInteractor, 0.35f, 0.08f);
             Unmount();
         }
     }
@@ -283,11 +292,23 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
         rotation = delta * transform.rotation;
     }
 
-    private static void SendPullHaptic(IXRInteractor interactor, float amplitude, float duration)
+    // Buzzes the holding hand(s) once each time the held part becomes aligned with a slot it would snap into.
+    private void UpdateSnapReady()
     {
-        var feedback = interactor.transform.GetComponent<SimpleHapticFeedback>();
-        if (feedback != null && feedback.hapticImpulsePlayer != null)
-            feedback.hapticImpulsePlayer.SendHapticImpulse(amplitude, duration);
+        if (IsMounted || !grabInteractable.isSelected)
+        {
+            snapReady = null;
+            return;
+        }
+        bool ready = SearchNearbySlots().bestFit != null;
+        // A short cooldown stops a hand trembling on the edge of the tolerance from buzzing repeatedly.
+        if (ready && snapReady == false && snapReadyHaptic > 0f && Time.time >= nextSnapReadyHapticTime)
+        {
+            foreach (var interactor in grabInteractable.interactorsSelecting)
+                GrabUtility.SendHaptic(interactor, snapReadyHaptic, 0.06f);
+            nextSnapReadyHapticTime = Time.time + 0.3f;
+        }
+        snapReady = ready;
     }
 
     private void ReportRemovalBlocker(SnapPoint blocker)
@@ -366,19 +387,22 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
         TryMountToNearbySlot();
     }
 
-    public bool TryMountToNearbySlot()
+    private struct SlotSearch
     {
-        if (IsMounted || grabInteractable.isSelected) return false;
-        Physics.SyncTransforms();
+        public SnapPoint bestFit;             // Aligned, free and with every prerequisite in place.
+        public SnapPoint blockedFit;          // Aligned, but still missing a prerequisite.
+        public SnapPoint missingPrerequisite;
+        public SnapPoint nearest;             // Nearest compatible slot, aligned or not.
+        public float nearestDistance;
+    }
+
+    private SlotSearch SearchNearbySlots()
+    {
         Transform pivot = AlignmentPivot;
         int hitCount = Physics.OverlapSphereNonAlloc(pivot.position, snapSearchRadius, overlapBuffer,
             Physics.AllLayers, QueryTriggerInteraction.Collide);
-        SnapPoint bestFit = null;
-        SnapPoint nearest = null;
-        SnapPoint blockedFit = null;
-        SnapPoint missingPrerequisite = null;
+        var result = new SlotSearch { nearestDistance = float.MaxValue };
         float bestDistance = float.MaxValue;
-        float nearestDistance = float.MaxValue;
         float blockedDistance = float.MaxValue;
 
         for (int i = 0; i < hitCount; i++)
@@ -386,7 +410,7 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
             SnapPoint slot = overlapBuffer[i].GetComponentInParent<SnapPoint>();
             if (slot == null || !slot.CanConsider(this)) continue;
             float distance = Vector3.Distance(pivot.position, slot.Target.position);
-            if (distance < nearestDistance) { nearest = slot; nearestDistance = distance; }
+            if (distance < result.nearestDistance) { result.nearest = slot; result.nearestDistance = distance; }
             // Only a part that would actually fit is reported as blocked by assembly order;
             // a badly rotated part falls through to the normal "snap rejected" diagnostics.
             if (!slot.EvaluatePrecisionFit(pivot)) continue;
@@ -394,32 +418,46 @@ public class MountablePart : MonoBehaviour, IXRSelectFilter, IXRHoverFilter
             {
                 if (distance < blockedDistance)
                 {
-                    blockedFit = slot;
-                    missingPrerequisite = missing;
+                    result.blockedFit = slot;
+                    result.missingPrerequisite = missing;
                     blockedDistance = distance;
                 }
                 continue;
             }
             if (distance < bestDistance)
             {
-                bestFit = slot;
+                result.bestFit = slot;
                 bestDistance = distance;
             }
         }
         System.Array.Clear(overlapBuffer, 0, hitCount);
+        return result;
+    }
 
-        if (bestFit != null && bestFit.TrySeat(this)) return true;
-        if (blockedFit != null)
+    public bool TryMountToNearbySlot()
+    {
+        if (IsMounted || grabInteractable.isSelected) return false;
+        Physics.SyncTransforms();
+        SlotSearch search = SearchNearbySlots();
+
+        if (search.bestFit != null && search.bestFit.TrySeat(this))
         {
-            blockedFit.ReportOrderRejected(AssemblyOrderViolationKind.MissingPrerequisite, this, missingPrerequisite);
+            Snapped?.Invoke(this, search.bestFit);
+            return true;
+        }
+        if (search.blockedFit != null)
+        {
+            search.blockedFit.ReportOrderRejected(AssemblyOrderViolationKind.MissingPrerequisite, this, search.missingPrerequisite);
             return false;
         }
         if (logSnapDiagnostics)
         {
+            Transform pivot = AlignmentPivot;
+            SnapPoint nearest = search.nearest;
             if (nearest == null)
                 Debug.Log($"{name}: No available compatible snap point found within {snapSearchRadius:F3} m of the alignment pivot.", this);
             else
-                Debug.Log($"{name}: Snap rejected by {nearest.name}. Distance: {nearestDistance:F3} m (maximum {nearest.maxPositionError:F3}); " +
+                Debug.Log($"{name}: Snap rejected by {nearest.name}. Distance: {search.nearestDistance:F3} m (maximum {nearest.maxPositionError:F3}); " +
                     $"forward alignment: {Vector3.Dot(pivot.forward, nearest.Target.forward):F3}, " +
                     $"up alignment: {Vector3.Dot(pivot.up, nearest.Target.up):F3} (minimum {nearest.minOrientationAlignment:F3}).", this);
         }

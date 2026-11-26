@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit.Feedback;
+using UnityEngine.XR.Interaction.Toolkit.Inputs.Haptics;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
@@ -35,6 +37,17 @@ public static class GrabUtility
     {
         var grab = component != null ? component.GetComponent<XRGrabInteractable>() : null;
         return grab != null && grab.isSelected;
+    }
+
+    // Buzzes the controller behind interactor, through its SimpleHapticFeedback or a parent HapticImpulsePlayer.
+    public static void SendHaptic(IXRInteractor interactor, float amplitude, float duration)
+    {
+        if (interactor == null || amplitude <= 0f) return;
+        HapticImpulsePlayer player = null;
+        var feedback = interactor.transform.GetComponent<SimpleHapticFeedback>();
+        if (feedback != null) player = feedback.hapticImpulsePlayer;
+        if (player == null) player = interactor.transform.GetComponentInParent<HapticImpulsePlayer>();
+        if (player != null) player.SendHapticImpulse(amplitude, duration);
     }
 
     // Takes the object out of every hand holding it.

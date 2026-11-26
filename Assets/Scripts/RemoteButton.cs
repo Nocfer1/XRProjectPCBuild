@@ -1,9 +1,7 @@
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.XR.Interaction.Toolkit;
-using UnityEngine.XR.Interaction.Toolkit.Feedback;
 using UnityEngine.XR.Interaction.Toolkit.Filtering;
-using UnityEngine.XR.Interaction.Toolkit.Inputs.Haptics;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
@@ -104,13 +102,6 @@ public class RemoteButton : MonoBehaviour, IXRHoverFilter, IXRSelectFilter
         onPressed.Invoke();
     }
 
-    private static void SendHaptic(IXRInteractor interactor, float amplitude, float duration)
-    {
-        if (interactor == null || amplitude <= 0f) return;
-        HapticImpulsePlayer player = null;
-        var feedback = interactor.transform.GetComponent<SimpleHapticFeedback>();
-        if (feedback != null) player = feedback.hapticImpulsePlayer;
-        if (player == null) player = interactor.transform.GetComponentInParent<HapticImpulsePlayer>();
-        if (player != null) player.SendHapticImpulse(amplitude, duration);
-    }
+    private static void SendHaptic(IXRInteractor interactor, float amplitude, float duration) =>
+        GrabUtility.SendHaptic(interactor, amplitude, duration);
 }
