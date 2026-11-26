@@ -51,7 +51,7 @@ public static class RemoteControlBuilder
         float top = BodySize.y * 0.5f;
         float spacing = ButtonSize.y + 0.014f;
         // Red at the front (furthest from the hand holding it), so the two blue ones are not next to Back To Menu.
-        AddButton(remote, "Back To Menu", "MENU", Red, new Vector3(0f, top, spacing), 0f, remote.BackToMenu);
+        AddButton(remote, "Back To Menu", "MENU", Red, new Vector3(0f, top, spacing), 0.5f, remote.BackToMenu);
         AddButton(remote, "Reset Stage", "RESET\nSTAGE", Blue, new Vector3(0f, top, 0f), 0.3f, remote.ResetStage);
         AddButton(remote, "Restart Full PC", "RESTART\nPC", Blue, new Vector3(0f, top, -spacing), 0.75f, remote.RestartFullPC);
 
